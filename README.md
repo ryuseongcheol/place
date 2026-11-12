@@ -2,8 +2,8 @@
 
 현재 위치 주변 식당을 **카카오맵·네이버지도의 별점/리뷰**로 평가해서, 고른 **테마**(혼밥·데이트·해장 등)나 **자유 입력**("비 오는 날 혼자 조용히 먹을 국물")에 맞게 추천하는 웹앱(PWA)입니다.
 
-- Next.js 15 (App Router) + TypeScript
-- 모바일 브라우저에서 위치 권한으로 바로 사용, 홈 화면에 추가 가능
+- **`mobile/`** — iOS·Android 네이티브 앱 (Expo + 네이버 지도). 사용법은 [mobile/README.md](mobile/README.md)
+- **루트** — 추천 API 서버 (Next.js 15). 키가 필요한 수집·AI 호출은 모두 여기서 하고, 앱은 이 API만 호출합니다. 간단한 웹 화면도 함께 제공합니다.
 
 ## 동작 방식
 
@@ -50,7 +50,8 @@ http://localhost:3000 접속. 휴대폰에서 위치를 쓰려면 HTTPS가 필�
 
 ## 지도 UI
 
-카카오맵 JavaScript SDK를 씁니다. 검색 결과(카카오 place id, 좌표)와 같은 출처라 핀 위치가 정확히 맞고, 일 30만 회까지 무료입니다. `NEXT_PUBLIC_KAKAO_JS_KEY`가 없거나 SDK 로드에 실패하면 지도 없이 목록만 보여줍니다 (`app/KakaoMap.tsx`).
+- 앱: 네이버 지도 SDK (`mobile/src/PlacesMap.tsx`)
+- 웹 화면: 카카오맵 JavaScript SDK를 씁니다. 검색 결과(카카오 place id, 좌표)와 같은 출처라 핀 위치가 정확히 맞고, 일 30만 회까지 무료입니다. `NEXT_PUBLIC_KAKAO_JS_KEY`가 없거나 SDK 로드에 실패하면 지도 없이 목록만 보여줍니다 (`app/KakaoMap.tsx`).
 
 ## ⚠️ 비공식 리뷰 수집에 대해
 
@@ -64,6 +65,7 @@ http://localhost:3000 접속. 휴대폰에서 위치를 쓰려면 HTTPS가 필�
 ## 구조
 
 ```
+mobile/                 네이티브 앱 (Expo)
 app/
   page.tsx              메인 화면 (위치, 테마, 결과 카드)
   KakaoMap.tsx          카카오맵 SDK 지도
