@@ -28,6 +28,9 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 45000): 
   try {
     const res = await fetch(`${API_BASE}${path}`, { ...init, signal: ctrl.signal });
     const json = await res.json().catch(() => ({}));
+    if (res.status === 404 && !(json as { error?: string }).error) {
+      throw new Error("서버에 이 기능이 아직 없어요. 서버가 최신 버전으로 배포됐는지 확인해 주세요. (404)");
+    }
     if (!res.ok) throw new Error((json as { error?: string }).error ?? `서버 오류 (${res.status})`);
     return json as T;
   } catch (e) {
