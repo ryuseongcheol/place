@@ -1,0 +1,43 @@
+name: Android 실행 점검 (최신 APK)
+
+# 테스트용 Release의 최신 APK를 에뮬레이터에 설치·실행하고 오류 로그를 자세히 출력한다.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/android-smoke.yml"]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: 최신 APK 받기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download android-test -R ${{ github.repository }} -p matjip-latest.apk -D apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: 에뮬레이터에서 실행
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -no-metrics
+          script: |
+            adb install -r apk/matjip-latest.apk
+            adb logcat -c
+            adb shell pm grant com.ryuseongcheol.matjip android.permission.ACCESS_FINE_LOCATION || true
+            adb shell am start -W -n com.ryuseongcheol.matjip/.MainActivity || true
+            sleep 30
+            (adb shell pidof com.ryuseongcheol.matjip && echo "SMOKE: APP_RUNNING") || echo "SMOKE: APP_NOT_RUNNING"
+            echo "===== crash 버퍼 =====" ; adb logcat -d -b crash -v brief | head -120 || true
+            adb logcat -d -v brief > logcat.txt || true
+            echo "===== 앱 관련 로그 =====" ; grep -E "matjip|ReactNativeJS|ReactNative|Hermes|SoLoader|UnsatisfiedLink|Fatal signal|SIGSEGV|SIGABRT|DEBUG  |libc  |FATAL|expo|Expo" logcat.txt | grep -v -E "chatty" | head -200 || true
