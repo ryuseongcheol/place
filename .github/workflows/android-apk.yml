@@ -53,7 +53,8 @@ jobs:
       - name: Build release APK
         working-directory: mobile/android
         # 테스트 배포용: 생성된 프로젝트의 기본 debug 키로 서명된 release APK
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        # arm64: 실제 폰, x86_64: 실행 점검용 에뮬레이터
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,x86_64
 
       - name: Rename APK
         run: |
@@ -86,3 +87,48 @@ jobs:
           name: matjip-android-apk
           path: dist/*.apk
           retention-days: 14
+
+  # 설치 후 실제로 켜지는지 에뮬레이터에서 점검하고 오류 로그를 남긴다
+  smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: matjip-android-apk
+          path: apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: 에뮬레이터에서 실행 점검
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            adb install -r "$(ls apk/*.apk | head -1)"
+            adb logcat -c
+            adb shell pm grant com.ryuseongcheol.matjip android.permission.ACCESS_FINE_LOCATION || true
+            adb shell monkey -p com.ryuseongcheol.matjip -c android.intent.category.LAUNCHER 1
+            sleep 40
+            (adb shell pidof com.ryuseongcheol.matjip && echo "SMOKE: APP_RUNNING") || echo "SMOKE: APP_NOT_RUNNING"
+            adb logcat -d -v brief > logcat.txt || true
+            echo "===== 오류 로그 ====="; grep -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|E/ReactNative|Exception|Error:" logcat.txt | grep -v -E "chatty|Watchdog" | head -150 || true
+            adb exec-out screencap -p > screen.png || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-logs
+          path: |
+            logcat.txt
+            screen.png
+          retention-days: 7
