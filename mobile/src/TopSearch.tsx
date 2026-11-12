@@ -33,6 +33,8 @@ export function progressText(p: RegionProgress | undefined): string {
       return `식당 목록 모으는 중 · ${p.listed}곳`;
     case "detail":
       return `분석 중 ${p.detailed}/${p.target}`;
+    case "ai":
+      return `AI 분류 중 ${p.aiDone ?? 0}/${p.detailed}`;
     case "done":
       return `${p.listed}곳 수집 완료`;
     case "error":

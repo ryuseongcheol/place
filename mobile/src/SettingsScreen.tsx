@@ -164,7 +164,7 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
             );
           })}
           <Text style={[styles.desc, { color: c.muted, marginTop: 8 }]}>
-            수집은 앱이 켜져 있는 동안 진행되고, 앱을 다시 켜면 이어서 해요. 지역당 최대 400곳의 별점·메뉴·후기를 보고 혼밥·데이트·가성비 같은 숨은 분류값을 계산해 기기에 저장해요.
+            수집은 앱이 켜져 있는 동안 진행되고, 앱을 다시 켜면 이어서 해요. 지역당 최대 1,200곳의 카카오 별점·메뉴·후기와 네이버 리뷰 수·키워드 리뷰를 모아 숨은 분류값을 계산하고, 서버에 Claude 키가 있으면 AI가 한 번 더 분류해요.
           </Text>
 
           <Text style={[styles.h2, { color: c.text, marginTop: 28 }]}>내 주변 검색 반경</Text>

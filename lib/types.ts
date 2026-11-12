@@ -186,6 +186,27 @@ export interface CrawledPlace extends BasePlace {
   priceLevel: number | null;
   detailAt: number | null;
   detailFailed?: boolean;
+  // 네이버 (폰에서 수집)
+  naverId?: string | null;
+  naverVisitorReviewCount?: number;
+  naverBlogReviewCount?: number;
+  naverKeywords?: string[];
+  /** 규칙 기반 분류값 (AI 분류와 섞기 전) */
+  ruleAttrs?: Partial<Record<string, number>>;
+  /** AI 분류를 마친 시각 */
+  aiAt?: number | null;
+}
+
+/** AI 분류 요청 한 곳 분량 */
+export interface AiClassifyInput {
+  id: string;
+  name: string;
+  category: string;
+  priceLevel: number | null;
+  menus: string[];
+  tags: string[];
+  reviews: string[];
+  openHours: string[];
 }
 
 export interface CrawlDetailItem {

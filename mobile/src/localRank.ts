@@ -20,7 +20,9 @@ function ratingScore(p: CrawledPlace) {
 }
 
 function popularity(p: CrawledPlace) {
-  return Math.min(1, Math.log10(1 + p.reviewCount + p.blogReviewCount * 0.5) / 3);
+  // 카카오 후기 + 네이버 방문자 리뷰 + 블로그(절반 가중)
+  const volume = p.reviewCount + (p.naverVisitorReviewCount ?? 0) + (p.blogReviewCount + (p.naverBlogReviewCount ?? 0)) * 0.5;
+  return Math.min(1, Math.log10(1 + volume) / 3.5);
 }
 
 function toScored(p: CrawledPlace, score: number, fit: number, reason: string, me: { lat: number; lng: number } | null): ScoredPlace {
@@ -31,7 +33,16 @@ function toScored(p: CrawledPlace, score: number, fit: number, reason: string, m
       p.rating !== null || p.reviewCount
         ? { rating: p.rating, ratingCount: p.ratingCount, reviewCount: p.reviewCount, blogReviewCount: p.blogReviewCount, snippets: p.snippets, tags: p.tags }
         : null,
-    naver: null,
+    naver: p.naverId
+      ? {
+          naverId: p.naverId,
+          visitorReviewCount: p.naverVisitorReviewCount ?? 0,
+          blogReviewCount: p.naverBlogReviewCount ?? 0,
+          rating: null,
+          keywords: p.naverKeywords ?? [],
+          naverUrl: `https://m.place.naver.com/restaurant/${p.naverId}/home`,
+        }
+      : null,
     score: Math.round(score),
     scoreBreakdown: { rating: Math.round(ratingScore(p) * 100), popularity: Math.round(popularity(p) * 100), relevance: fit, distance: 0 },
     reason,
@@ -93,7 +104,7 @@ export function rankByText(places: CrawledPlace[], text: string, me: { lat: numb
         [normalizeName(p.name), 3],
         [normalizeName(p.category), 2],
         [normalizeName(p.menus.map((m) => m.name).join(" ")), 2],
-        [normalizeName(p.tags.join(" ")), 1.5],
+        [normalizeName([...p.tags, ...(p.naverKeywords ?? [])].join(" ")), 1.5],
         [normalizeName(p.snippets.join(" ")), 1],
       ] as const;
       let match = 0;

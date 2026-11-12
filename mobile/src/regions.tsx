@@ -2,10 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Directory, File, Paths } from "expo-file-system";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Platform } from "react-native";
-import { crawlDetail, crawlList, type RegionHit } from "./api";
+import { crawlAi, crawlDetail, crawlList, type RegionHit } from "./api";
 import { deviceKakaoBlocked, fetchKakaoRawDevice } from "./kakaoDevice";
-import { classify, detailFromRaw, haversine } from "./shared";
-import type { BasePlace, CrawlCursor, CrawlDetailItem, CrawledPlace, Region } from "./types";
+import { lookupNaverPlace, naverDeviceBlocked, type NaverPlaceInfo } from "./naverDevice";
+import { classify, detailFromRaw, haversine, mergeAttrs, type Attrs } from "./shared";
+import type { AiClassifyInput, BasePlace, CrawlCursor, CrawlDetailItem, CrawledPlace, Region } from "./types";
 
 /**
  * 설정에서 고른 지역(최대 5곳)의 맛집을 미리 수집해 기기에 저장한다.
@@ -15,8 +16,10 @@ import type { BasePlace, CrawlCursor, CrawlDetailItem, CrawledPlace, Region } fr
  */
 
 export const MAX_REGIONS = 5;
-export const REGION_RADIUS = 800; // m
-const MAX_DETAIL = 400; // 지역당 상세 조회 상한 (중심에서 가까운 순)
+export const REGION_RADIUS = 1000; // m
+const MAX_DETAIL = 1200; // 지역당 상세 조회 상한 (중심에서 가까운 순)
+const DETAIL_CONCURRENCY = 6;
+const AI_BATCH = 20;
 const SETTINGS_KEY = "regions:v1";
 const FILE_VERSION = 1;
 
@@ -31,10 +34,12 @@ interface RegionFile {
 }
 
 export interface RegionProgress {
-  phase: "waiting" | "listing" | "detail" | "done" | "error";
+  phase: "waiting" | "listing" | "detail" | "ai" | "done" | "error";
   listed: number;
   detailed: number;
   target: number;
+  /** AI 분류를 마친 곳 수 (AI 키가 없으면 0) */
+  aiDone?: number;
   message?: string;
   doneAt?: number | null;
 }
@@ -103,9 +108,15 @@ function fromBase(p: BasePlace, region: Region): CrawledPlace {
   };
 }
 
-function applyDetail(p: CrawledPlace, d: CrawlDetailItem): CrawledPlace {
+function applyDetail(p: CrawledPlace, d: CrawlDetailItem, naver: NaverPlaceInfo | null): CrawledPlace {
   return {
     ...p,
+    naverId: naver?.id ?? null,
+    naverVisitorReviewCount: naver?.visitorReviewCount ?? 0,
+    naverBlogReviewCount: naver?.blogReviewCount ?? 0,
+    naverKeywords: naver?.keywords ?? [],
+    ruleAttrs: d.attrs,
+    aiAt: null,
     rating: d.rating,
     ratingCount: d.ratingCount,
     reviewCount: d.reviewCount,
@@ -122,6 +133,19 @@ function applyDetail(p: CrawledPlace, d: CrawlDetailItem): CrawledPlace {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function aiInput(p: CrawledPlace): AiClassifyInput {
+  return {
+    id: p.id,
+    name: p.name.slice(0, 80),
+    category: p.category.slice(0, 120),
+    priceLevel: p.priceLevel,
+    menus: p.menus.slice(0, 10).map((m) => `${m.name}${m.price ? ` ${m.price}` : ""}`.slice(0, 60)),
+    tags: [...p.tags, ...(p.naverKeywords ?? [])].slice(0, 16).map((t) => t.slice(0, 40)),
+    reviews: p.snippets.slice(0, 8).map((r) => r.slice(0, 200)),
+    openHours: p.openHours.slice(0, 4).map((h) => h.slice(0, 60)),
+  };
+}
 
 // ---------- Context ----------
 
@@ -148,6 +172,7 @@ export function RegionsProvider({ children }: { children: ReactNode }) {
   const running = useRef(false);
   const errored = useRef(new Set<string>());
   const cache = useRef(new Map<string, CrawledPlace[]>());
+  const aiUnavailable = useRef(false);
   regionsRef.current = regions;
 
   const setP = useCallback((id: string, p: Partial<RegionProgress>) => {
@@ -197,7 +222,7 @@ export function RegionsProvider({ children }: { children: ReactNode }) {
       listDone: false,
       doneAt: null,
     };
-    if (data.doneAt) return;
+    // 이미 끝난 지역도 다시 훑는다: 한도가 늘었으면 남은 곳 상세, AI 키가 생겼으면 AI 분류
 
     // 1) 목록
     while (!data.listDone) {
@@ -219,8 +244,8 @@ export function RegionsProvider({ children }: { children: ReactNode }) {
     setP(region.id, { phase: "detail", listed: all.length, detailed, target: targets.length });
 
     let sinceSave = 0;
-    const done = async (p: CrawledPlace, d: CrawlDetailItem) => {
-      data.places[p.id] = applyDetail(p, d);
+    const done = async (p: CrawledPlace, d: CrawlDetailItem, naver: NaverPlaceInfo | null = null) => {
+      data.places[p.id] = applyDetail(p, d, naver);
       detailed++;
       sinceSave++;
       if (sinceSave >= 20) {
@@ -243,18 +268,52 @@ export function RegionsProvider({ children }: { children: ReactNode }) {
         }
         i += chunk.length;
       } else {
-        // 폰에서 4곳씩 동시에, 너무 몰리지 않게 조금씩 쉬면서
-        const chunk = pending.slice(i, i + 4);
+        // 폰에서 여러 곳을 동시에: 카카오 상세 + 네이버(리뷰 수·키워드 리뷰)
+        const chunk = pending.slice(i, i + DETAIL_CONCURRENCY);
         await Promise.all(
           chunk.map(async (p) => {
-            const raw = await fetchKakaoRawDevice(p.id);
-            await done(p, detailFromRaw(p, raw));
+            const [raw, naver] = await Promise.all([
+              fetchKakaoRawDevice(p.id),
+              naverDeviceBlocked() ? Promise.resolve(null) : lookupNaverPlace(p).catch(() => null),
+            ]);
+            const extra = naver ? { keywords: naver.keywords, visitorReviewCount: naver.visitorReviewCount, blogReviewCount: naver.blogReviewCount } : {};
+            await done(p, detailFromRaw(p, raw, extra), naver);
           }),
         );
         i += chunk.length;
-        await sleep(250);
+        await sleep(60);
       }
     }
+    await save(data);
+
+    // 3) AI 분류 (서버에 ANTHROPIC_API_KEY가 있을 때만). 상세를 받은 곳만, 규칙 분류와 섞는다
+    if (!aiUnavailable.current) {
+      const aiTargets = Object.values(data.places).filter((p) => p.detailAt && !p.aiAt && !p.id.startsWith("mock-"));
+      let aiDone = Object.values(data.places).filter((p) => p.aiAt).length;
+      setP(region.id, { phase: "ai", aiDone });
+      for (let j = 0; j < aiTargets.length; j += AI_BATCH) {
+        if (!stillSelected(region.id)) return;
+        const batch = aiTargets.slice(j, j + AI_BATCH);
+        try {
+          const res = await crawlAi(batch.map(aiInput));
+          for (const it of res.items) {
+            const p = data.places[it.id];
+            if (!p) continue;
+            data.places[it.id] = { ...p, attrs: mergeAttrs((p.ruleAttrs ?? p.attrs) as Attrs, it.attrs as Attrs), aiAt: Date.now() };
+            aiDone++;
+          }
+          setP(region.id, { aiDone });
+          await save(data);
+        } catch (e) {
+          // 키가 없으면(503) 이번 실행 동안은 AI 단계를 건너뛴다. 그 밖의 오류는 다음 묶음으로
+          if (e instanceof Error && /ANTHROPIC_API_KEY/.test(e.message)) {
+            aiUnavailable.current = true;
+            break;
+          }
+        }
+      }
+    }
+
     data.doneAt = Date.now();
     await save(data);
     setP(region.id, { phase: "done", detailed, doneAt: data.doneAt });

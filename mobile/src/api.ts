@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import type { BasePlace, CrawlCursor, CrawlDetailItem, CrawlListResponse, PlaceDetail, RecommendResponse, Region } from "./types";
+import type { AiClassifyInput, BasePlace, CrawlCursor, CrawlDetailItem, CrawlListResponse, PlaceDetail, RecommendResponse, Region } from "./types";
 
 export interface PresetChip {
   id: string;
@@ -90,4 +90,12 @@ export function crawlDetail(places: Array<Pick<BasePlace, "id" | "name" | "categ
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ places }),
   }, 60000);
+}
+
+export function crawlAi(places: AiClassifyInput[]) {
+  return request<{ items: Array<{ id: string; attrs: Partial<Record<string, number>> }> }>("/api/crawl/ai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ places }),
+  }, 120000);
 }
