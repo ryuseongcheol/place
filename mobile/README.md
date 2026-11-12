@@ -11,7 +11,7 @@
 
 1. **네이버 지도 키**: [네이버 클라우드 플랫폼](https://console.ncloud.com) > Services > Maps > Application 등록
    - Dynamic Map 선택, Android 패키지명 `com.ryuseongcheol.matjip`, iOS Bundle ID `com.ryuseongcheol.matjip` 입력
-   - 발급된 **Client ID**를 `.env`의 `NAVER_MAP_CLIENT_ID`에
+   - 발급된 **Client ID**는 `app.config.ts`에 기본값으로 들어 있음. 다른 키를 쓰려면 `.env`의 `NAVER_MAP_CLIENT_ID`에
 2. **서버**: 저장소 루트에서 `npm run dev` (기본 :3000)
 
 ```bash

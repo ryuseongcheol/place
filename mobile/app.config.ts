@@ -1,8 +1,8 @@
 import type { ExpoConfig } from "expo/config";
 
-// 네이버 클라우드 플랫폼 > Maps > Application 의 Client ID
-// .env 의 NAVER_MAP_CLIENT_ID 또는 EAS 환경변수로 넣는다 (지도 SDK용, 공개돼도 되는 키)
-const NAVER_MAP_CLIENT_ID = process.env.NAVER_MAP_CLIENT_ID ?? "";
+// 네이버 클라우드 플랫폼 > Maps > Application 의 Client ID (지도 SDK용, 앱에 포함되는 공개 키)
+// .env 의 NAVER_MAP_CLIENT_ID 가 있으면 그 값을 우선 사용
+const NAVER_MAP_CLIENT_ID = process.env.NAVER_MAP_CLIENT_ID || "3ukni6vwbn";
 
 const LOCATION_MESSAGE = "현재 위치 주변 식당을 추천하기 위해 위치 정보를 사용합니다.";
 
