@@ -80,3 +80,50 @@ export interface RecommendResponse {
   };
   warnings: string[];
 }
+
+// ---------- 식당 상세 (/api/place/[id]) ----------
+
+export interface MenuItem {
+  name: string;
+  price: string | null;
+  image: string | null;
+}
+
+export interface ReviewItem {
+  text: string;
+  rating: number | null;
+  date: string | null;
+  author: string | null;
+  photos: string[];
+}
+
+export interface BlogReview {
+  title: string;
+  snippet: string;
+  url: string;
+  blogger: string | null;
+  date: string | null;
+  thumbnail: string | null;
+  source: "kakao" | "naver";
+}
+
+export interface PlaceDetail {
+  id: string;
+  photos: string[];
+  photoSource: "kakao" | "naver" | null;
+  menus: MenuItem[];
+  openHours: string[];
+  homepage: string | null;
+  kakaoReviews: ReviewItem[];
+  blogReviews: BlogReview[];
+  /** 네이버 블로그 검색 결과 총 건수 (가게명+동네로 검색한 대략치) */
+  blogReviewTotal: number | null;
+  links: {
+    kakaoPlace: string;
+    kakaoReviews: string;
+    naverPlace: string;
+    naverVisitorReviews: string;
+    naverBlogReviews: string;
+  };
+  sources: { kakaoDetail: SourceStatus; naverBlog: SourceStatus; naverImage: SourceStatus };
+}

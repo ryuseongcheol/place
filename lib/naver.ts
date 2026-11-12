@@ -1,5 +1,6 @@
-import type { BasePlace, LatLng, NaverReviewInfo } from "./types";
-import { BROWSER_UA, TTLCache, collectStrings, deepFind, fetchWithTimeout, haversine, nameSimilarity, toNumber } from "./util";
+import { formatDate, normalizeImageUrl, stripTags } from "./kakaoDetail";
+import type { BasePlace, BlogReview, LatLng, NaverReviewInfo } from "./types";
+import { BROWSER_UA, TTLCache, collectStrings, deepFind, fetchWithTimeout, haversine, nameSimilarity, normalizeName, toNumber } from "./util";
 
 /**
  * 네이버 지도 장소 후보 (비공식 검색 or 공식 검색 API에서 얻음)
@@ -193,4 +194,95 @@ export async function attachNaver(
 
 export function naverSearchUrl(name: string) {
   return `https://map.naver.com/p/search/${encodeURIComponent(name)}`;
+}
+
+// ---------- 식당 상세용 (공식 검색 API) ----------
+
+const blogCache = new TTLCache<{ items: BlogReview[]; total: number } | null>(6 * 60 * 60 * 1000, 500);
+const imageCache = new TTLCache<string[] | null>(6 * 60 * 60 * 1000, 500);
+
+export function naverSearchEnabled() {
+  return Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET);
+}
+
+function naverHeaders() {
+  return { "X-Naver-Client-Id": process.env.NAVER_CLIENT_ID!, "X-Naver-Client-Secret": process.env.NAVER_CLIENT_SECRET! };
+}
+
+/** 가게 이름의 핵심 부분 (지점명/공백 제거) — 블로그 글이 정말 이 가게 얘기인지 거르는 데 쓴다 */
+function coreName(name: string) {
+  return normalizeName(name.replace(/\s*\S+점$/, ""));
+}
+
+/**
+ * [공식] 네이버 블로그 검색. "동네 + 가게명"으로 검색하고, 제목/본문에 가게명이 들어간 글만 남긴다.
+ */
+export async function naverBlogSearch(name: string, region: string | null): Promise<{ items: BlogReview[]; total: number } | null> {
+  if (!naverSearchEnabled()) return null;
+  const dong = region?.split(" ").pop() ?? "";
+  const query = `${dong} ${name}`.trim();
+  const cached = blogCache.get(query);
+  if (cached !== undefined) return cached;
+  try {
+    const params = new URLSearchParams({ query, display: "30", sort: "sim" });
+    const res = await fetchWithTimeout(`https://openapi.naver.com/v1/search/blog.json?${params}`, { headers: naverHeaders() });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = (await res.json()) as {
+      total: number;
+      items: Array<{ title: string; link: string; description: string; bloggername: string; postdate: string }>;
+    };
+    const core = coreName(name);
+    const items = data.items
+      .map(
+        (it): BlogReview => ({
+          title: stripTags(it.title),
+          snippet: stripTags(it.description).slice(0, 200),
+          url: it.link,
+          blogger: it.bloggername || null,
+          date: formatDate(it.postdate),
+          thumbnail: null,
+          source: "naver",
+        }),
+      )
+      .filter((b) => !core || normalizeName(`${b.title} ${b.snippet}`).includes(core))
+      .slice(0, 15);
+    const out = { items, total: data.total };
+    blogCache.set(query, out);
+    return out;
+  } catch {
+    blogCache.set(query, null);
+    return null;
+  }
+}
+
+/** [공식] 네이버 이미지 검색 — 카카오 사진이 없을 때 대체 사진으로 쓴다 (네이버 검색 썸네일 주소) */
+export async function naverImageSearch(name: string, region: string | null): Promise<string[] | null> {
+  if (!naverSearchEnabled()) return null;
+  const dong = region?.split(" ").pop() ?? "";
+  const query = `${dong} ${name}`.trim();
+  const cached = imageCache.get(query);
+  if (cached !== undefined) return cached;
+  try {
+    const params = new URLSearchParams({ query, display: "12", sort: "sim", filter: "medium" });
+    const res = await fetchWithTimeout(`https://openapi.naver.com/v1/search/image?${params}`, { headers: naverHeaders() });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = (await res.json()) as { items: Array<{ thumbnail: string; link: string }> };
+    const out = data.items.map((i) => normalizeImageUrl(i.thumbnail)).filter((u): u is string => Boolean(u));
+    imageCache.set(query, out);
+    return out;
+  } catch {
+    imageCache.set(query, null);
+    return null;
+  }
+}
+
+/** 네이버 플레이스 모바일 페이지 링크 (리뷰는 웹뷰로 이 페이지를 보여준다) */
+export function naverPlaceLinks(naverId: string | null, name: string, region: string | null) {
+  if (naverId) {
+    const base = `https://m.place.naver.com/restaurant/${naverId}`;
+    return { place: `${base}/home`, visitor: `${base}/review/visitor`, blog: `${base}/review/ugc` };
+  }
+  const q = encodeURIComponent(`${region?.split(" ").pop() ?? ""} ${name}`.trim());
+  const search = `https://m.search.naver.com/search.naver?query=${q}`;
+  return { place: `https://m.map.naver.com/search2/search.naver?query=${q}`, visitor: search, blog: `https://m.search.naver.com/search.naver?where=m_blog&query=${q}` };
 }

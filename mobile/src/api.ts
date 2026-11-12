@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import type { RecommendResponse } from "./types";
+import type { PlaceDetail, RecommendResponse } from "./types";
 
 export interface PresetChip {
   id: string;
@@ -55,4 +55,10 @@ export function fetchRecommendations(body: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+export function fetchPlaceDetail(p: { id: string; name: string; lat: number; lng: number; naverId: string | null }) {
+  const qs = new URLSearchParams({ name: p.name, lat: String(p.lat), lng: String(p.lng) });
+  if (p.naverId) qs.set("naverId", p.naverId);
+  return request<PlaceDetail>(`/api/place/${encodeURIComponent(p.id)}?${qs}`, undefined, 30000);
 }

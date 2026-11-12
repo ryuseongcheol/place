@@ -1,39 +1,50 @@
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Keyboard,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { fetchRecommendations, fetchThemes, type PresetChip } from "./src/api";
-import { callPhone, openKakaoMap, openNaverMap } from "./src/openMap";
-import PlacesMap from "./src/PlacesMap";
-import { useColors, type Colors } from "./src/theme";
-import type { RecommendResponse, ScoredPlace, SourceStatus } from "./src/types";
+import BottomSheet, { type BottomSheetRef, type SheetSnap } from "./src/BottomSheet";
+import { FavoritesProvider, useFavorites } from "./src/favorites";
+import { PlaceBody, PlaceHeader } from "./src/PlaceDetailView";
+import { ListHeader, PlaceList } from "./src/PlaceList";
+import PlacesMap, { type PlacesMapRef } from "./src/PlacesMap";
+import SearchPanel from "./src/SearchPanel";
+import { useColors } from "./src/theme";
+import type { RecommendResponse, ScoredPlace } from "./src/types";
 import { useLocation } from "./src/useLocation";
+import WebViewModal, { type WebTarget } from "./src/WebViewModal";
 
-const RADII = [500, 1000, 2000];
+const HALF_RATIO = 0.45;
+
+type SheetState =
+  | { mode: "list" }
+  | { mode: "detail"; place: ScoredPlace; fromList: boolean };
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <Main />
+      <FavoritesProvider>
+        <MapScreen />
+      </FavoritesProvider>
     </SafeAreaProvider>
   );
 }
 
-function Main() {
-  const c = useColors();
-  const s = useMemo(() => makeStyles(c), [c]);
-  const { loc, locate } = useLocation();
+function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371000;
+  const r = (d: number) => (d * Math.PI) / 180;
+  const s = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(s)));
+}
 
+function MapScreen() {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  const { height: H } = useWindowDimensions();
+  const { loc, locate } = useLocation();
+  const fav = useFavorites();
+
+  // 추천 조건
   const [presets, setPresets] = useState<PresetChip[]>([]);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -42,10 +53,17 @@ function Main() {
   const [radius, setRadius] = useState(1000);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 화면 상태
+  const [searchOpen, setSearchOpen] = useState(true); // 앱 실행 시 추천 팝업을 바로 띄운다
   const [data, setData] = useState<RecommendResponse | null>(null);
-  const [searchedAt, setSearchedAt] = useState<{ lat: number; lng: number } | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const listRef = useRef<FlatList<ScoredPlace>>(null);
+  const [listSource, setListSource] = useState<"results" | "favorites">("results");
+  const [sheet, setSheet] = useState<SheetState>({ mode: "list" });
+  const [snap, setSnap] = useState<SheetSnap>("closed");
+  const [webTarget, setWebTarget] = useState<WebTarget | null>(null);
+
+  const mapRef = useRef<PlacesMapRef>(null);
+  const sheetRef = useRef<BottomSheetRef>(null);
 
   const loadThemes = useCallback(() => {
     setServerError(null);
@@ -56,23 +74,30 @@ function Main() {
       })
       .catch((e: Error) => setServerError(e.message));
   }, []);
-
   useEffect(loadThemes, [loadThemes]);
 
-  const hasPosition = loc.status !== "locating";
-  const canSearch = hasPosition && !loading && (presetId !== null || text.trim().length > 0);
+  const me = loc.status === "locating" ? null : { lat: loc.lat, lng: loc.lng };
+  const mapPlaces = listSource === "favorites" ? fav.favorites : (data?.places ?? []);
+  const selectedId = snap !== "closed" && sheet.mode === "detail" ? sheet.place.id : null;
+  const favoriteIds = useMemo(() => new Set(fav.favorites.map((f) => f.id)), [fav.favorites]);
+  const distanceOf = useCallback((p: ScoredPlace) => (me ? haversine(me, p) : null), [me?.lat, me?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function search() {
     if (loc.status === "locating") return;
-    Keyboard.dismiss();
     setLoading(true);
     setError(null);
-    setSelectedId(null);
     try {
       const res = await fetchRecommendations({ lat: loc.lat, lng: loc.lng, radius, presetId, text: text.trim() || null });
+      if (res.places.length === 0) {
+        setError(res.warnings[res.warnings.length - 1] ?? "조건에 맞는 식당을 찾지 못했어요. 반경을 넓혀보세요.");
+        return;
+      }
       setData(res);
-      setSearchedAt({ lat: loc.lat, lng: loc.lng });
-      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      setListSource("results");
+      setSearchOpen(false);
+      setSheet({ mode: "list" });
+      setSnap("half");
+      sheetRef.current?.scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : "추천을 불러오지 못했어요.");
     } finally {
@@ -80,359 +105,230 @@ function Main() {
     }
   }
 
-  const selectFromMap = useCallback(
-    (id: string) => {
-      setSelectedId(id);
-      const index = data?.places.findIndex((p) => p.id === id) ?? -1;
-      if (index >= 0) listRef.current?.scrollToIndex({ index, viewPosition: 0.3, animated: true });
-    },
-    [data],
-  );
+  const openDetail = useCallback((place: ScoredPlace, fromList: boolean) => {
+    setSheet({ mode: "detail", place, fromList });
+    setSnap((s) => (s === "full" && fromList ? "full" : "half"));
+    sheetRef.current?.scrollToTop();
+    mapRef.current?.focus(place.lat, place.lng);
+  }, []);
 
-  const header = (
-    <View>
-      <View style={s.brandRow}>
-        <Text style={s.brand}>
-          근처<Text style={{ color: c.accent }}>맛집</Text>
-        </Text>
-        <Text style={s.brandSub}>카카오맵 · 네이버지도 리뷰 기반</Text>
+  const openList = (source: "results" | "favorites") => {
+    setListSource(source);
+    setSheet({ mode: "list" });
+    setSnap("half");
+    setSearchOpen(false);
+    sheetRef.current?.scrollToTop();
+  };
+
+  const backToList = () => {
+    setSheet({ mode: "list" });
+    sheetRef.current?.scrollToTop();
+    mapRef.current?.fitAll();
+  };
+
+  const closeSheet = () => setSnap("closed");
+
+  // 안드로이드 뒤로가기: 팝업 → 상세 → 목록 → 시트 순으로 닫기
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (webTarget) return false; // 웹뷰 모달이 직접 처리
+      if (searchOpen) {
+        setSearchOpen(false);
+        return true;
+      }
+      if (snap !== "closed") {
+        if (sheet.mode === "detail" && sheet.fromList) backToList();
+        else closeSheet();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  });
+
+  const topBarHeight = 56;
+  const summary = data ? `${data.query.summary} · ${data.places.length}곳` : "맛집 추천받기";
+
+  return (
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <StatusBar style={c.bg === "#16130F" ? "light" : "dark"} />
+
+      {/* 1. 전체 화면 지도 */}
+      <PlacesMap
+        ref={mapRef}
+        me={me}
+        places={mapPlaces}
+        selectedId={selectedId}
+        favoriteIds={favoriteIds}
+        starMarkers={listSource === "favorites"}
+        onSelect={(p) => openDetail(p, false)}
+        onTapMap={() => snap === "half" && closeSheet()}
+        padding={{ top: insets.top + topBarHeight, bottom: snap === "half" ? Math.round(H * HALF_RATIO) : 0 }}
+        colors={c}
+      />
+
+      {/* 상단 바: 현재 추천 요약 + 즐겨찾기 */}
+      <View style={[styles.topBar, { top: insets.top + 8 }]} pointerEvents="box-none">
+        <Pressable
+          style={[styles.searchPill, { backgroundColor: c.surface }]}
+          onPress={() => (data ? openList("results") : setSearchOpen(true))}
+          accessibilityRole="button"
+        >
+          <Text style={{ fontSize: 16 }}>🍽</Text>
+          <Text style={{ flex: 1, fontSize: 15, color: data ? c.text : c.muted, fontWeight: data ? "600" : "400" }} numberOfLines={1}>
+            {summary}
+          </Text>
+          {data && <Text style={{ color: c.muted, fontSize: 13 }}>목록</Text>}
+        </Pressable>
+        <Pressable
+          style={[styles.roundBtn, { backgroundColor: listSource === "favorites" && snap !== "closed" ? "#F5A400" : c.surface }]}
+          onPress={() => openList("favorites")}
+          accessibilityRole="button"
+          accessibilityLabel="즐겨찾기"
+        >
+          <Text style={{ fontSize: 20, color: listSource === "favorites" && snap !== "closed" ? "#fff" : "#F5A400" }}>★</Text>
+        </Pressable>
       </View>
 
-      <View style={s.panel}>
-        <View style={s.locRow}>
-          <View style={[s.dot, { backgroundColor: loc.status === "ok" ? c.naver : c.muted }]} />
-          <Text style={s.locText} numberOfLines={1}>
-            {loc.status === "locating" ? "현재 위치 확인 중…" : loc.status === "ok" ? "현재 위치 기준" : "강남역 기준 (기본 위치)"}
-          </Text>
-          <Pressable style={s.ghost} onPress={locate} disabled={loc.status === "locating"} accessibilityRole="button">
-            <Text style={s.ghostText}>위치 다시 찾기</Text>
+      {/* 3. 지도 화면의 맛집추천 버튼 + 내 위치 */}
+      {snap === "closed" && !searchOpen && (
+        <View style={[styles.bottomBar, { bottom: insets.bottom + 20 }]} pointerEvents="box-none">
+          <Pressable style={[styles.recommendBtn, { backgroundColor: c.accent }]} onPress={() => setSearchOpen(true)} accessibilityRole="button">
+            <Text style={styles.recommendText}>🍽 맛집추천</Text>
           </Pressable>
-        </View>
-        {loc.status === "fallback" && <Notice c={c} text={loc.message} />}
-        {serverError && (
-          <Pressable onPress={loadThemes}>
-            <Notice c={c} error text={`${serverError}\n눌러서 다시 시도`} />
+          <Pressable
+            style={[styles.roundBtn, styles.myLoc, { backgroundColor: c.surface }]}
+            onPress={() => {
+              locate();
+              if (me) mapRef.current?.focus(me.lat, me.lng, 15);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="내 위치"
+          >
+            <Text style={{ fontSize: 18, color: "#1a73e8" }}>◎</Text>
           </Pressable>
-        )}
-
-        <Text style={s.label}>어떤 식당을 찾으세요?</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips} keyboardShouldPersistTaps="handled">
-          {presets.map((p) => {
-            const on = presetId === p.id;
-            return (
-              <Pressable
-                key={p.id}
-                onPress={() => setPresetId(on ? null : p.id)}
-                style={[s.chip, on && { backgroundColor: c.accentSoft, borderColor: c.accent }]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-              >
-                <Text style={[s.chipText, on && { color: c.accent, fontWeight: "700" }]}>
-                  {p.emoji} {p.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        <Text style={s.label}>원하는 걸 자유롭게 적어도 돼요{!aiEnabled ? " (AI 미연결: 검색어로 사용)" : ""}</Text>
-        <TextInput
-          style={s.input}
-          value={text}
-          onChangeText={setText}
-          placeholder="예: 비 오는 날 혼자 조용히 먹을 따뜻한 국물"
-          placeholderTextColor={c.muted}
-          maxLength={200}
-          returnKeyType="search"
-          onSubmitEditing={() => canSearch && search()}
-        />
-
-        <View style={s.actionRow}>
-          <View style={s.seg}>
-            {RADII.map((r, i) => {
-              const on = radius === r;
-              return (
-                <Pressable
-                  key={r}
-                  onPress={() => setRadius(r)}
-                  style={[s.segBtn, i > 0 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: c.line }, on && { backgroundColor: c.text }]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                >
-                  <Text style={[s.segText, on && { color: c.bg, fontWeight: "700" }]}>{r < 1000 ? `${r}m` : `${r / 1000}km`}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Pressable style={[s.primary, !canSearch && { opacity: 0.5 }]} onPress={search} disabled={!canSearch} accessibilityRole="button">
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryText}>추천 받기</Text>}
-          </Pressable>
-        </View>
-        {!presetId && !text.trim() && <Text style={s.hint}>테마를 고르거나 원하는 걸 입력하면 추천을 받을 수 있어요.</Text>}
-        {error && <Notice c={c} error text={error} />}
-      </View>
-
-      {loading && <Text style={s.loadingText}>카카오맵·네이버지도 리뷰를 모아서 분석하고 있어요…</Text>}
-
-      {!loading && data && searchedAt && (
-        <View style={{ marginTop: 20 }}>
-          <Text style={s.summary}>
-            <Text style={{ color: c.text, fontWeight: "700" }}>{data.query.summary}</Text>
-            {data.region ? ` · ${data.region}` : ""}
-            {"\n"}검색어: {data.query.keywords.join(", ")}
-          </Text>
-          <Sources c={c} sources={data.sources} />
-          {data.warnings.map((w) => (
-            <Notice key={w} c={c} text={w} />
-          ))}
-          {data.places.length > 0 && (
-            <PlacesMap center={searchedAt} places={data.places} selectedId={selectedId} onSelect={selectFromMap} colors={c} />
-          )}
         </View>
       )}
-    </View>
-  );
 
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
-      <StatusBar style="auto" />
-      <FlatList
-        ref={listRef}
-        data={loading ? [] : (data?.places ?? [])}
-        keyExtractor={(p) => p.id}
-        ListHeaderComponent={header}
-        contentContainerStyle={s.content}
-        keyboardShouldPersistTaps="handled"
-        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-        renderItem={({ item, index }) => (
-          <PlaceCard place={item} rank={index + 1} c={c} s={s} selected={item.id === selectedId} onPress={() => setSelectedId(item.id)} />
-        )}
-        ListEmptyComponent={
-          !loading && data ? (
-            <Text style={s.empty}>조건에 맞는 식당을 찾지 못했어요.{"\n"}반경을 넓히거나 다른 테마로 찾아보세요.</Text>
-          ) : undefined
+      {/* 4. 바텀시트: 목록 / 식당 상세 (반 팝업 ↔ 전체) */}
+      <BottomSheet
+        ref={sheetRef}
+        snap={snap}
+        onSnapChange={setSnap}
+        colors={c}
+        halfRatio={HALF_RATIO}
+        header={
+          sheet.mode === "detail" ? (
+            <PlaceHeader
+              place={sheet.place}
+              colors={c}
+              distance={distanceOf(sheet.place)}
+              onBack={sheet.fromList ? backToList : undefined}
+              onClose={closeSheet}
+            />
+          ) : listSource === "favorites" ? (
+            <ListHeader title={`즐겨찾기 ${fav.favorites.length}`} subtitle="기기에 저장된 식당" colors={c} onClose={closeSheet} />
+          ) : (
+            <ListHeader
+              title={data?.query.summary ?? "추천 결과"}
+              subtitle={data ? `검색어: ${data.query.keywords.join(", ")}${data.region ? ` · ${data.region}` : ""}` : undefined}
+              colors={c}
+              onClose={closeSheet}
+            />
+          )
         }
-        ListFooterComponent={
-          <Text style={s.foot}>
-            별점·리뷰 수는 카카오맵·네이버지도의 공개 정보를 참고용으로 가져온 것이며 실제와 다를 수 있어요.
-          </Text>
-        }
-        onScrollToIndexFailed={({ index, averageItemLength }) =>
-          listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: true })
-        }
-      />
-    </SafeAreaView>
-  );
-}
-
-function Notice({ c, text, error }: { c: Colors; text: string; error?: boolean }) {
-  return (
-    <View style={{ backgroundColor: error ? c.errorBg : c.warnBg, borderRadius: 10, padding: 10, marginTop: 12 }}>
-      <Text style={{ color: error ? c.errorText : c.warnText, fontSize: 13, lineHeight: 19 }}>{text}</Text>
-    </View>
-  );
-}
-
-const SOURCE_LABEL: Record<keyof RecommendResponse["sources"], string> = {
-  kakaoSearch: "카카오 검색",
-  kakaoReviews: "카카오 별점",
-  naverReviews: "네이버 리뷰",
-  ai: "AI 추천",
-};
-const STATUS_LABEL: Record<SourceStatus, string> = { ok: "정상", partial: "일부", failed: "실패", disabled: "꺼짐", mock: "예시" };
-
-function Sources({ c, sources }: { c: Colors; sources: RecommendResponse["sources"] }) {
-  return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
-      {(Object.keys(sources) as Array<keyof typeof sources>).map((k) => {
-        const st = sources[k];
-        const ok = st === "ok";
-        const failed = st === "failed";
-        return (
-          <View key={k} style={{ backgroundColor: ok ? c.naverBg : failed ? c.errorBg : c.surface2, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 }}>
-            <Text style={{ fontSize: 11, color: ok ? c.naver : failed ? c.errorText : c.muted }}>
-              {SOURCE_LABEL[k]} {STATUS_LABEL[st]}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-function formatDistance(m: number) {
-  return m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`;
-}
-
-function PlaceCard({
-  place: p,
-  rank,
-  c,
-  s,
-  selected,
-  onPress,
-}: {
-  place: ScoredPlace;
-  rank: number;
-  c: Colors;
-  s: ReturnType<typeof makeStyles>;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  const [showReviews, setShowReviews] = useState(false);
-  const category = p.category.split(">").slice(-2).join(" · ").trim();
-  const walkMin = Math.max(1, Math.round(p.distance / 70));
-  const snippets = p.kakao?.snippets ?? [];
-  const naverHas = p.naver && (p.naver.visitorReviewCount > 0 || p.naver.blogReviewCount > 0);
-
-  return (
-    <Pressable onPress={onPress} style={[s.card, selected && { borderColor: c.accent, borderWidth: 1.5 }]}>
-      <View style={s.cardHead}>
-        <View style={[s.rank, selected && { backgroundColor: c.accent }]}>
-          <Text style={s.rankText}>{rank}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.name}>{p.name}</Text>
-          <Text style={s.meta}>
-            {category} · {formatDistance(p.distance)} (도보 약 {walkMin}분)
-          </Text>
-        </View>
-        <View style={{ alignItems: "flex-end" }}>
-          <Text style={s.score}>{p.score}</Text>
-          <Text style={s.scoreLabel}>{p.aiRanked ? "AI 적합도" : "추천 점수"}</Text>
-        </View>
-      </View>
-
-      <View style={s.badges}>
-        {p.kakao?.rating != null ? (
-          <Badge bg={c.kakaoBg} fg={c.kakao} text={`카카오 ★ ${p.kakao.rating.toFixed(1)} (${p.kakao.ratingCount.toLocaleString()})`} />
-        ) : (
-          <Badge bg={c.surface2} fg={c.muted} text="카카오 별점 없음" />
-        )}
-        {naverHas ? (
-          <Badge
-            bg={c.naverBg}
-            fg={c.naver}
-            text={`네이버 ${p.naver!.rating ? `★ ${p.naver!.rating.toFixed(1)} · ` : ""}방문자 ${p.naver!.visitorReviewCount.toLocaleString()} · 블로그 ${p.naver!.blogReviewCount.toLocaleString()}`}
+      >
+        {sheet.mode === "detail" ? (
+          <PlaceBody
+            place={sheet.place}
+            colors={c}
+            isFavorite={fav.isFavorite(sheet.place.id)}
+            onToggleFavorite={() => fav.toggle(sheet.place)}
+            openWeb={setWebTarget}
           />
         ) : (
-          <Badge bg={c.surface2} fg={c.muted} text="네이버 리뷰 정보 없음" />
+          <PlaceList
+            places={mapPlaces}
+            colors={c}
+            distanceOf={distanceOf}
+            onPick={(p) => openDetail(p, true)}
+            numbered={listSource === "results"}
+            notices={listSource === "results" ? data?.warnings : undefined}
+            emptyText={listSource === "favorites" ? "저장한 식당이 없어요.\n식당 정보에서 ☆ 저장을 눌러보세요." : "추천 결과가 없어요."}
+          />
         )}
-      </View>
+      </BottomSheet>
 
-      <Text style={s.reason}>{p.reason}</Text>
-
-      {p.highlights.length > 0 && (
-        <View style={s.tags}>
-          {p.highlights.map((h) => (
-            <Text key={h} style={s.tag}>
-              {h}
-            </Text>
-          ))}
-        </View>
+      {/* 2. 추천 팝업 (앱 실행 시 기본 표시) */}
+      {searchOpen && (
+        <SearchPanel
+          colors={c}
+          loc={loc}
+          onRelocate={locate}
+          presets={presets}
+          presetId={presetId}
+          setPresetId={setPresetId}
+          text={text}
+          setText={setText}
+          radius={radius}
+          setRadius={setRadius}
+          aiEnabled={aiEnabled}
+          loading={loading}
+          error={error}
+          serverError={serverError}
+          onRetryServer={loadThemes}
+          onSubmit={search}
+          onClose={() => setSearchOpen(false)}
+        />
       )}
 
-      {snippets.length > 0 && (
-        <Pressable onPress={() => setShowReviews((v) => !v)} hitSlop={8} accessibilityRole="button">
-          <Text style={s.reviewToggle}>
-            {showReviews ? "▾" : "▸"} 카카오맵 후기 {snippets.length}개 {showReviews ? "접기" : "보기"}
-          </Text>
-          {showReviews &&
-            snippets.slice(0, 4).map((r) => (
-              <Text key={r} style={s.review}>
-                • {r}
-              </Text>
-            ))}
-        </Pressable>
-      )}
-
-      <View style={s.links}>
-        <Pressable style={[s.linkBtn, { backgroundColor: c.kakaoBg }]} onPress={() => openKakaoMap(p)} accessibilityRole="link">
-          <Text style={[s.linkText, { color: c.kakao }]}>카카오맵</Text>
-        </Pressable>
-        <Pressable style={[s.linkBtn, { backgroundColor: c.naverBg }]} onPress={() => openNaverMap(p)} accessibilityRole="link">
-          <Text style={[s.linkText, { color: c.naver }]}>네이버지도</Text>
-        </Pressable>
-        {!!p.phone && (
-          <Pressable style={[s.linkBtn, { backgroundColor: c.surface2, flex: 0.6 }]} onPress={() => callPhone(p.phone)} accessibilityRole="button">
-            <Text style={[s.linkText, { color: c.text }]}>전화</Text>
-          </Pressable>
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
-function Badge({ bg, fg, text }: { bg: string; fg: string; text: string }) {
-  return (
-    <View style={{ backgroundColor: bg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-      <Text style={{ color: fg, fontSize: 12, fontWeight: "600" }}>{text}</Text>
+      {/* 5. 리뷰·블로그 웹뷰 */}
+      <WebViewModal target={webTarget} onClose={() => setWebTarget(null)} colors={c} />
     </View>
   );
 }
 
-function makeStyles(c: Colors) {
-  return StyleSheet.create({
-    content: { padding: 16, paddingBottom: 48 },
-    brandRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 },
-    brand: { fontSize: 24, fontWeight: "800", color: c.text, letterSpacing: -0.5 },
-    brandSub: { fontSize: 12, color: c.muted },
-    panel: { backgroundColor: c.surface, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.line, padding: 16 },
-    locRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-    dot: { width: 8, height: 8, borderRadius: 4 },
-    locText: { flex: 1, fontSize: 14, fontWeight: "700", color: c.text },
-    ghost: { borderWidth: 1, borderColor: c.line, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-    ghostText: { fontSize: 13, color: c.text },
-    label: { fontSize: 13, fontWeight: "600", color: c.muted, marginTop: 18, marginBottom: 8 },
-    chips: { gap: 8, paddingRight: 8 },
-    chip: { borderWidth: 1, borderColor: c.line, backgroundColor: c.surface, borderRadius: 999, paddingHorizontal: 13, minHeight: 40, justifyContent: "center" },
-    chipText: { fontSize: 14, color: c.text },
-    input: {
-      borderWidth: 1,
-      borderColor: c.line,
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      fontSize: 16,
-      color: c.text,
-      backgroundColor: c.surface,
-    },
-    actionRow: { flexDirection: "row", gap: 10, marginTop: 16, alignItems: "stretch" },
-    seg: { flexDirection: "row", borderWidth: 1, borderColor: c.line, borderRadius: 10, overflow: "hidden" },
-    segBtn: { paddingHorizontal: 12, minHeight: 46, justifyContent: "center", backgroundColor: c.surface },
-    segText: { fontSize: 13, color: c.text },
-    primary: { flex: 1, backgroundColor: c.accent, borderRadius: 12, alignItems: "center", justifyContent: "center", minHeight: 46 },
-    primaryText: { color: "#fff", fontSize: 16, fontWeight: "800" },
-    hint: { fontSize: 12, color: c.muted, marginTop: 10 },
-    loadingText: { textAlign: "center", color: c.muted, marginTop: 28, fontSize: 14 },
-    summary: { fontSize: 14, color: c.muted, lineHeight: 21, marginBottom: 8 },
-    card: { backgroundColor: c.surface, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.line, padding: 16 },
-    cardHead: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
-    rank: { width: 28, height: 28, borderRadius: 8, backgroundColor: c.text, alignItems: "center", justifyContent: "center" },
-    rankText: { color: c.bg, fontWeight: "800", fontSize: 14 },
-    name: { fontSize: 17, fontWeight: "700", color: c.text },
-    meta: { fontSize: 13, color: c.muted, marginTop: 3 },
-    score: { fontSize: 20, fontWeight: "800", color: c.accent },
-    scoreLabel: { fontSize: 11, color: c.muted },
-    badges: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12 },
-    reason: { fontSize: 14, lineHeight: 22, color: c.text, marginTop: 12 },
-    tags: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 },
-    tag: {
-      fontSize: 12,
-      color: c.muted,
-      borderWidth: 1,
-      borderColor: c.line,
-      borderRadius: 999,
-      paddingHorizontal: 9,
-      paddingVertical: 3,
-      overflow: "hidden",
-    },
-    reviewToggle: { fontSize: 13, color: c.muted, marginTop: 12 },
-    review: { fontSize: 13, color: c.muted, lineHeight: 20, marginTop: 4, paddingLeft: 4 },
-    links: { flexDirection: "row", gap: 8, marginTop: 14 },
-    linkBtn: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: "center" },
-    linkText: { fontSize: 13, fontWeight: "700" },
-    empty: { textAlign: "center", color: c.muted, fontSize: 14, lineHeight: 22, paddingVertical: 32 },
-    foot: { fontSize: 11, color: c.muted, textAlign: "center", marginTop: 28, lineHeight: 17 },
-  });
-}
+const styles = StyleSheet.create({
+  topBar: { position: "absolute", left: 12, right: 12, flexDirection: "row", gap: 8 },
+  searchPill: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  roundBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  bottomBar: { position: "absolute", left: 0, right: 0, alignItems: "center" },
+  recommendBtn: {
+    height: 52,
+    borderRadius: 26,
+    paddingHorizontal: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 8,
+  },
+  recommendText: { color: "#fff", fontSize: 17, fontWeight: "800" },
+  myLoc: { position: "absolute", right: 12, bottom: 2 },
+});

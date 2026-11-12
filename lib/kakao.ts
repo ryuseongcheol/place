@@ -4,7 +4,7 @@ import { BROWSER_UA, TTLCache, collectStrings, deepFind, fetchWithTimeout, toNum
 const KAKAO_LOCAL = "https://dapi.kakao.com/v2/local";
 
 const searchCache = new TTLCache<BasePlace[]>(10 * 60 * 1000);
-const reviewCache = new TTLCache<KakaoReviewInfo | null>(6 * 60 * 60 * 1000);
+const rawCache = new TTLCache<unknown | null>(6 * 60 * 60 * 1000, 500);
 const regionCache = new TTLCache<string | null>(24 * 60 * 60 * 1000);
 
 function authHeaders() {
@@ -100,12 +100,12 @@ export async function regionName(loc: LatLng): Promise<string | null> {
 }
 
 /**
- * [비공식] 카카오맵 장소 상세의 별점·후기.
+ * [비공식] 카카오맵 장소 상세 원본 JSON.
  * 카카오맵 웹 페이지가 내부적으로 호출하는 엔드포인트로, 예고 없이 바뀌거나 막힐 수 있다.
- * 두 가지 알려진 형태를 순서대로 시도하고, 응답 구조는 키 이름으로 느슨하게 파싱한다.
+ * 두 가지 알려진 형태를 순서대로 시도한다. 별점 요약과 상세 화면이 같은 캐시를 쓴다.
  */
-export async function fetchKakaoReviews(placeId: string): Promise<KakaoReviewInfo | null> {
-  const cached = reviewCache.get(placeId);
+export async function fetchKakaoRaw(placeId: string): Promise<unknown | null> {
+  const cached = rawCache.get(placeId);
   if (cached !== undefined) return cached;
 
   const attempts: Array<{ url: string; headers: Record<string, string> }> = [
@@ -126,17 +126,22 @@ export async function fetchKakaoReviews(placeId: string): Promise<KakaoReviewInf
       });
       if (!res.ok) continue;
       const json = (await res.json()) as unknown;
-      const info = parseKakaoDetail(json);
-      if (info) {
-        reviewCache.set(placeId, info);
-        return info;
+      if (json && typeof json === "object") {
+        rawCache.set(placeId, json);
+        return json;
       }
     } catch {
       // 다음 형태 시도
     }
   }
-  reviewCache.set(placeId, null);
+  rawCache.set(placeId, null);
   return null;
+}
+
+/** [비공식] 카카오맵 별점·후기 요약 (추천 점수용) */
+export async function fetchKakaoReviews(placeId: string): Promise<KakaoReviewInfo | null> {
+  const raw = await fetchKakaoRaw(placeId);
+  return raw ? parseKakaoDetail(raw) : null;
 }
 
 export function parseKakaoDetail(json: unknown): KakaoReviewInfo | null {

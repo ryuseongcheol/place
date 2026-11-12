@@ -4,15 +4,18 @@
   "main": "index.ts",
   "dependencies": {
     "@mj-studio/react-native-naver-map": "^2.11.0",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~58.0.24",
     "expo-build-properties": "~58.0.12",
     "expo-constants": "~58.0.16",
     "expo-dev-client": "~58.0.19",
+    "expo-image": "~58.0.18",
     "expo-location": "~58.0.21",
     "expo-status-bar": "~58.0.5",
     "react": "19.3.0",
     "react-native": "0.88.1",
-    "react-native-safe-area-context": "~5.11.1"
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-webview": "14.0.1"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",

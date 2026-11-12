@@ -1,4 +1,4 @@
-import type { BasePlace, KakaoReviewInfo, LatLng, NaverReviewInfo } from "./types";
+import type { BasePlace, KakaoReviewInfo, LatLng, NaverReviewInfo, PlaceDetail } from "./types";
 import { haversine } from "./util";
 
 /** 키 없이 UI를 개발/시연하기 위한 가짜 데이터. 사용자 위치 주변에 흩뿌린다. */
@@ -62,5 +62,45 @@ export function mockNaver(id: string, name: string): NaverReviewInfo | null {
     rating: null,
     keywords: s.tags.map((t) => `${t} 좋아요`),
     naverUrl: `https://map.naver.com/p/search/${encodeURIComponent(name)}`,
+  };
+}
+
+const MOCK_MENUS: Record<string, Array<[string, number]>> = {
+  국밥: [["순대국", 10000], ["특순대국", 12000], ["모듬순대", 15000]],
+  라면: [["돈코츠 라멘", 11000], ["매운 라멘", 12000], ["교자", 6000]],
+  default: [["대표 메뉴", 12000], ["사이드 메뉴", 7000]],
+};
+
+export function mockDetail(id: string, name: string): PlaceDetail {
+  const s = SAMPLES[Number(id.replace("mock-", ""))];
+  const key = s ? Object.keys(MOCK_MENUS).find((k) => s.category.includes(k)) : undefined;
+  const menus = (MOCK_MENUS[key ?? "default"] ?? MOCK_MENUS.default).map(([n, p]) => ({ name: n, price: `${p.toLocaleString("ko-KR")}원`, image: null }));
+  const q = encodeURIComponent(name);
+  return {
+    id,
+    photos: [1, 2, 3, 4].map((i) => `https://picsum.photos/seed/${id}-${i}/600/400`),
+    photoSource: "kakao",
+    menus,
+    openHours: ["매일 11:00 ~ 22:00", "브레이크타임 15:00 ~ 17:00"],
+    homepage: null,
+    kakaoReviews: (s?.snippets ?? ["맛있어요"]).map((t, i) => ({ text: t, rating: 5 - (i % 2), date: "2026.10.0" + (i + 1), author: `리뷰어${i + 1}`, photos: [] })),
+    blogReviews: [1, 2, 3].map((i) => ({
+      title: `${name} 다녀온 후기 #${i}`,
+      snippet: "예시 블로그 리뷰입니다. 실제 키를 넣으면 네이버 블로그 검색 결과가 나와요.",
+      url: `https://m.search.naver.com/search.naver?where=m_blog&query=${q}`,
+      blogger: `블로거${i}`,
+      date: `2026.09.1${i}`,
+      thumbnail: `https://picsum.photos/seed/${id}-blog${i}/200/200`,
+      source: "naver" as const,
+    })),
+    blogReviewTotal: 128,
+    links: {
+      kakaoPlace: `https://m.map.kakao.com/actions/searchView?q=${q}`,
+      kakaoReviews: `https://m.map.kakao.com/actions/searchView?q=${q}`,
+      naverPlace: `https://m.map.naver.com/search2/search.naver?query=${q}`,
+      naverVisitorReviews: `https://m.search.naver.com/search.naver?query=${q}`,
+      naverBlogReviews: `https://m.search.naver.com/search.naver?where=m_blog&query=${q}`,
+    },
+    sources: { kakaoDetail: "mock", naverBlog: "mock", naverImage: "mock" },
   };
 }

@@ -1,5 +1,5 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import type { Colors } from "./theme";
 import type { ScoredPlace } from "./types";
@@ -16,47 +16,70 @@ const NaverMap: typeof import("@mj-studio/react-native-naver-map") | null = (() 
   }
 })();
 
+export interface PlacesMapRef {
+  focus: (lat: number, lng: number, zoom?: number) => void;
+  fitAll: () => void;
+}
+
 interface Props {
-  center: { lat: number; lng: number };
+  me: { lat: number; lng: number } | null;
   places: ScoredPlace[];
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  favoriteIds: Set<string>;
+  onSelect: (place: ScoredPlace) => void;
+  onTapMap?: () => void;
+  /** 아래 시트/위 버튼에 가려지는 영역 (지도 중심 계산용) */
+  padding: { top: number; bottom: number };
+  /** 번호 대신 ★로 표시 (즐겨찾기 목록일 때) */
+  starMarkers?: boolean;
   colors: Colors;
 }
 
-export default function PlacesMap({ center, places, selectedId, onSelect, colors }: Props) {
-  const ref = useRef<import("@mj-studio/react-native-naver-map").NaverMapViewRef>(null);
+const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
+  { me, places, selectedId, favoriteIds, onSelect, onTapMap, padding, starMarkers, colors },
+  ref,
+) {
+  const mapRef = useRef<import("@mj-studio/react-native-naver-map").NaverMapViewRef>(null);
 
-  // 결과가 바뀌면 전체가 보이도록
-  useEffect(() => {
-    if (!ref.current || places.length === 0) return;
-    const lats = [center.lat, ...places.map((p) => p.lat)];
-    const lngs = [center.lng, ...places.map((p) => p.lng)];
+  const fitAll = () => {
+    if (!mapRef.current || places.length === 0) return;
+    const pts = [...places.map((p) => ({ lat: p.lat, lng: p.lng })), ...(me ? [me] : [])];
+    const lats = pts.map((p) => p.lat);
+    const lngs = pts.map((p) => p.lng);
     const minLat = Math.min(...lats);
     const maxLat = Math.max(...lats);
     const minLng = Math.min(...lngs);
     const maxLng = Math.max(...lngs);
-    ref.current.animateRegionTo({
-      latitude: minLat,
-      longitude: minLng,
-      latitudeDelta: (maxLat - minLat) * 1.3 || 0.01,
-      longitudeDelta: (maxLng - minLng) * 1.3 || 0.01,
-      duration: 400,
+    const padLat = Math.max((maxLat - minLat) * 0.15, 0.002);
+    const padLng = Math.max((maxLng - minLng) * 0.15, 0.002);
+    mapRef.current.animateRegionTo({
+      latitude: minLat - padLat,
+      longitude: minLng - padLng,
+      latitudeDelta: maxLat - minLat + padLat * 2,
+      longitudeDelta: maxLng - minLng + padLng * 2,
+      duration: 450,
     });
-  }, [places, center.lat, center.lng]);
+  };
 
-  // 선택한 식당으로 이동
+  useImperativeHandle(ref, () => ({
+    focus: (lat, lng, zoom = 16) => mapRef.current?.animateCameraTo({ latitude: lat, longitude: lng, zoom, duration: 350 }),
+    fitAll,
+  }));
+
+  // 결과 목록이 바뀌면 전체가 보이게
+  const placesKey = places.map((p) => p.id).join(",");
   useEffect(() => {
-    const p = places.find((x) => x.id === selectedId);
-    if (p && ref.current) ref.current.animateCameraTo({ latitude: p.lat, longitude: p.lng, zoom: 16, duration: 350 });
-  }, [selectedId, places]);
+    const t = setTimeout(fitAll, 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placesKey]);
 
   if (!NaverMap) {
     return (
-      <View style={[styles.placeholder, { backgroundColor: colors.surface2, borderColor: colors.line }]}>
+      <View style={[StyleSheet.absoluteFill, styles.placeholder, { backgroundColor: colors.surface2 }]}>
         <Text style={{ color: colors.muted, fontSize: 13, textAlign: "center", lineHeight: 19 }}>
           {isExpoGo
-            ? "네이버 지도는 Expo Go에서 보이지 않아요.\n개발 빌드(npx expo run:ios / run:android)에서 확인하세요."
+            ? "네이버 지도는 Expo Go에서 보이지 않아요.\n개발 빌드나 설치용 APK에서 확인하세요."
             : "지도를 불러오지 못했어요."}
         </Text>
       </View>
@@ -64,54 +87,47 @@ export default function PlacesMap({ center, places, selectedId, onSelect, colors
   }
 
   const { NaverMapView, NaverMapMarkerOverlay } = NaverMap;
+  const start = me ?? { lat: 37.4979, lng: 127.0276 };
   return (
-    <View style={[styles.wrap, { borderColor: colors.line }]}>
-      <NaverMapView
-        ref={ref}
-        style={StyleSheet.absoluteFill}
-        initialCamera={{ latitude: center.lat, longitude: center.lng, zoom: 15 }}
-        isShowLocationButton={false}
-        isShowZoomControls={false}
-        isExtentBoundedInKorea
-        locale="ko"
-        locationOverlay={{ isVisible: true, position: { latitude: center.lat, longitude: center.lng } }}
-      >
-        {places.map((p, i) => {
-          const active = p.id === selectedId;
-          return (
-            <NaverMapMarkerOverlay
-              key={p.id}
-              latitude={p.lat}
-              longitude={p.lng}
-              image={{ symbol: active ? "red" : "black" }}
-              width={active ? 34 : 26}
-              height={active ? 44 : 34}
-              zIndex={active ? 10 : 1}
-              caption={{ text: `${i + 1}. ${p.name}`, textSize: active ? 13 : 11 }}
-              onTap={() => onSelect(p.id)}
-            />
-          );
-        })}
-      </NaverMapView>
-    </View>
+    <NaverMapView
+      ref={mapRef}
+      style={StyleSheet.absoluteFill}
+      initialCamera={{ latitude: start.lat, longitude: start.lng, zoom: 15 }}
+      mapPadding={{ top: padding.top, bottom: padding.bottom, left: 0, right: 0 }}
+      isShowLocationButton={false}
+      isShowZoomControls={false}
+      isShowScaleBar={false}
+      isExtentBoundedInKorea
+      isNightModeEnabled={colors.bg === "#16130F"}
+      locale="ko"
+      logoAlign="BottomLeft"
+      locationOverlay={me ? { isVisible: true, position: { latitude: me.lat, longitude: me.lng } } : { isVisible: false }}
+      onTapMap={onTapMap}
+    >
+      {places.map((p, i) => {
+        const active = p.id === selectedId;
+        const fav = favoriteIds.has(p.id);
+        return (
+          <NaverMapMarkerOverlay
+            key={p.id}
+            latitude={p.lat}
+            longitude={p.lng}
+            image={{ symbol: active ? "red" : fav ? "yellow" : "black" }}
+            width={active ? 36 : 28}
+            height={active ? 46 : 36}
+            zIndex={active ? 100 : places.length - i}
+            caption={{ text: starMarkers ? `★ ${p.name}` : `${i + 1}. ${p.name}`, textSize: active ? 14 : 12, haloColor: "#ffffff" }}
+            isHideCollidedCaptions
+            onTap={() => onSelect(p)}
+          />
+        );
+      })}
+    </NaverMapView>
   );
-}
+});
+
+export default PlacesMap;
 
 const styles = StyleSheet.create({
-  wrap: {
-    height: 280,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-    marginBottom: 12,
-  },
-  placeholder: {
-    height: 120,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-    marginBottom: 12,
-  },
+  placeholder: { alignItems: "center", justifyContent: "center", padding: 24 },
 });

@@ -70,10 +70,13 @@ app/
   page.tsx              메인 화면 (위치, 테마, 결과 카드)
   KakaoMap.tsx          카카오맵 SDK 지도
   api/recommend/route.ts  추천 API (POST)
+  api/place/[id]/route.ts 식당 상세 API (GET: 사진·메뉴·후기·블로그 리뷰)
   api/themes/route.ts     테마 목록 + 설정 상태
 lib/
   recommend.ts          전체 파이프라인
   kakao.ts              카카오 검색(공식) + 별점(비공식)
+  kakaoDetail.ts        카카오 상세에서 사진·메뉴·후기·블로그 추출
+  placeDetail.ts        식당 상세 조립
   naver.ts              네이버 검색(공식/비공식) + 장소 매칭
   score.ts              점수 계산
   ai.ts                 Claude: 주제 해석, 재정렬
