@@ -1,3 +1,4 @@
+import type { Budget } from "./budget";
 import type { BasePlace, KakaoReviewInfo, LatLng } from "./types";
 import { BROWSER_UA, TTLCache, collectStrings, deepFind, fetchWithTimeout, toNumber } from "./util";
 
@@ -37,13 +38,15 @@ export async function searchKakao(
   radius: number,
   categoryCode: "FD6" | "CE7",
   pages = 2,
+  budget?: Budget,
 ): Promise<BasePlace[]> {
-  const cacheKey = `${keyword}|${loc.lat.toFixed(4)}|${loc.lng.toFixed(4)}|${radius}|${categoryCode}`;
+  const cacheKey = `${keyword}|${loc.lat.toFixed(4)}|${loc.lng.toFixed(4)}|${radius}|${categoryCode}|${pages}`;
   const cached = searchCache.get(cacheKey);
   if (cached) return cached;
 
   const out: BasePlace[] = [];
   for (let page = 1; page <= pages; page++) {
+    if (budget && !budget.take()) break;
     const params = new URLSearchParams({
       query: keyword,
       x: String(loc.lng),
@@ -80,10 +83,11 @@ export async function searchKakao(
 }
 
 /** [공식] 좌표 → 행정동 이름 (네이버 검색어 보조용) */
-export async function regionName(loc: LatLng): Promise<string | null> {
+export async function regionName(loc: LatLng, budget?: Budget): Promise<string | null> {
   const key = `${loc.lat.toFixed(3)}|${loc.lng.toFixed(3)}`;
   const cached = regionCache.get(key);
   if (cached !== undefined) return cached;
+  if (budget && !budget.take()) return null;
   try {
     const res = await fetchWithTimeout(`${KAKAO_LOCAL}/geo/coord2regioncode.json?x=${loc.lng}&y=${loc.lat}`, {
       headers: authHeaders(),
@@ -104,7 +108,10 @@ export async function regionName(loc: LatLng): Promise<string | null> {
  * 카카오맵 웹 페이지가 내부적으로 호출하는 엔드포인트로, 예고 없이 바뀌거나 막힐 수 있다.
  * 두 가지 알려진 형태를 순서대로 시도한다. 별점 요약과 상세 화면이 같은 캐시를 쓴다.
  */
-export async function fetchKakaoRaw(placeId: string): Promise<unknown | null> {
+// 마지막으로 성공한 엔드포인트를 먼저 시도해서 호출 수를 아낀다
+let preferredAttempt = 0;
+
+export async function fetchKakaoRaw(placeId: string, budget?: Budget): Promise<unknown | null> {
   const cached = rawCache.get(placeId);
   if (cached !== undefined) return cached;
 
@@ -119,7 +126,9 @@ export async function fetchKakaoRaw(placeId: string): Promise<unknown | null> {
     },
   ];
 
-  for (const a of attempts) {
+  const order = preferredAttempt === 0 ? attempts : [attempts[preferredAttempt], ...attempts.filter((_, i) => i !== preferredAttempt)];
+  for (const a of order) {
+    if (budget && !budget.take()) return null; // 예산 소진: 캐시하지 않고 포기
     try {
       const res = await fetchWithTimeout(a.url, {
         headers: { "User-Agent": BROWSER_UA, Accept: "application/json", "Accept-Language": "ko-KR,ko;q=0.9", ...a.headers },
@@ -127,6 +136,7 @@ export async function fetchKakaoRaw(placeId: string): Promise<unknown | null> {
       if (!res.ok) continue;
       const json = (await res.json()) as unknown;
       if (json && typeof json === "object") {
+        preferredAttempt = attempts.indexOf(a);
         rawCache.set(placeId, json);
         return json;
       }
@@ -139,8 +149,8 @@ export async function fetchKakaoRaw(placeId: string): Promise<unknown | null> {
 }
 
 /** [비공식] 카카오맵 별점·후기 요약 (추천 점수용) */
-export async function fetchKakaoReviews(placeId: string): Promise<KakaoReviewInfo | null> {
-  const raw = await fetchKakaoRaw(placeId);
+export async function fetchKakaoReviews(placeId: string, budget?: Budget): Promise<KakaoReviewInfo | null> {
+  const raw = await fetchKakaoRaw(placeId, budget);
   return raw ? parseKakaoDetail(raw) : null;
 }
 

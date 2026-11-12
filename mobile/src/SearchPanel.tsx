@@ -4,7 +4,7 @@ import type { PresetChip } from "./api";
 import type { Colors } from "./theme";
 import type { LocState } from "./useLocation";
 
-export const RADII = [500, 1000, 2000];
+export const RADII = [500, 1000, 2000, 3000];
 
 interface Props {
   colors: Colors;

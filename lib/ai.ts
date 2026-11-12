@@ -19,7 +19,7 @@ function getClient() {
 // ---------- 1) 자유 입력 주제 → 검색 조건 ----------
 
 const ThemeSchema = z.object({
-  keywords: z.array(z.string()).describe("카카오맵 키워드 검색에 그대로 넣을 짧은 검색어 2~4개 (예: '국밥', '평양냉면', '오마카세')"),
+  keywords: z.array(z.string()).describe("카카오맵 키워드 검색에 그대로 넣을 짧은 검색어 4~6개 (예: '국밥', '평양냉면', '오마카세')"),
   includeCafe: z.boolean().describe("카페/디저트/베이커리도 후보에 포함해야 하면 true"),
   avoid: z.array(z.string()).describe("업종명·카테고리에 있으면 제외할 단어"),
   boost: z.array(z.string()).describe("리뷰·카테고리에 있으면 주제에 잘 맞는다는 신호가 되는 단어 3~8개"),
@@ -59,7 +59,7 @@ export async function parseTheme(preset: ThemePreset | undefined, text: string):
   const w = out.weights;
   const sum = w.rating + w.popularity + w.relevance + w.distance;
   return {
-    keywords: out.keywords.map((k) => k.trim()).filter(Boolean).slice(0, 4),
+    keywords: out.keywords.map((k) => k.trim()).filter(Boolean).slice(0, 6),
     includeCafe: out.includeCafe || Boolean(preset?.query.includeCafe),
     avoid: out.avoid.slice(0, 8),
     boost: out.boost.slice(0, 10),
@@ -95,6 +95,7 @@ const RERANK_SYSTEM = `너는 리뷰를 꼼꼼히 읽는 한국 맛집 큐레이
 export async function rerank(
   q: ThemeQuery,
   places: ScoredPlace[],
+  maxPicks = 20,
 ): Promise<Map<string, { fit: number; reason: string; highlights: string[]; order: number }>> {
   const candidates = places.map((p) => ({
     id: p.id,
@@ -113,13 +114,13 @@ export async function rerank(
 
   const res = await getClient().messages.parse({
     model: MODEL,
-    max_tokens: 8000,
+    max_tokens: 12000,
     output_config: { effort: "medium", format: zodOutputFormat(RerankSchema) },
     system: RERANK_SYSTEM,
     messages: [
       {
         role: "user",
-        content: `주제: ${q.summary}\n선호 신호: ${q.boost.join(", ") || "없음"}\n피할 것: ${q.avoid.join(", ") || "없음"}\n\n후보 (JSON):\n${JSON.stringify(candidates)}\n\n최대 10곳을 골라줘.`,
+        content: `주제: ${q.summary}\n선호 신호: ${q.boost.join(", ") || "없음"}\n피할 것: ${q.avoid.join(", ") || "없음"}\n\n후보 (JSON):\n${JSON.stringify(candidates)}\n\n주제에 맞는 곳을 최대 ${maxPicks}곳 골라줘. 주제와 명백히 안 맞는 곳만 빼고, 애매하면 순위를 낮춰서 포함해.`,
       },
     ],
   });

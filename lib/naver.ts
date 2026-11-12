@@ -1,4 +1,5 @@
 import { formatDate, normalizeImageUrl, stripTags } from "./kakaoDetail";
+import type { Budget } from "./budget";
 import type { BasePlace, BlogReview, LatLng, NaverReviewInfo } from "./types";
 import { BROWSER_UA, TTLCache, collectStrings, deepFind, fetchWithTimeout, haversine, nameSimilarity, normalizeName, toNumber } from "./util";
 
@@ -24,10 +25,11 @@ const officialCache = new TTLCache<NaverCandidate[]>(30 * 60 * 1000);
  * 한 번 호출로 주변 장소 여러 개의 리뷰 수를 받을 수 있어 장소마다 호출하지 않아도 된다.
  * 응답 구조/차단 정책이 수시로 바뀌므로 실패하면 빈 배열을 돌려준다.
  */
-export async function naverMapSearch(query: string, loc: LatLng): Promise<NaverCandidate[]> {
+export async function naverMapSearch(query: string, loc: LatLng, budget?: Budget): Promise<NaverCandidate[]> {
   const key = `${query}|${loc.lat.toFixed(3)}|${loc.lng.toFixed(3)}`;
   const cached = mapSearchCache.get(key);
   if (cached) return cached;
+  if (budget && !budget.take()) return [];
 
   const params = new URLSearchParams({
     query,
@@ -81,12 +83,13 @@ export async function naverMapSearch(query: string, loc: LatLng): Promise<NaverC
  * [공식] 네이버 검색 API(지역). 최대 5건, 리뷰 정보는 없음.
  * 비공식 검색이 막혔을 때 최소한 네이버 지도 링크를 정확히 걸기 위한 보조 수단.
  */
-export async function naverOfficialLocal(query: string): Promise<NaverCandidate[]> {
+export async function naverOfficialLocal(query: string, budget?: Budget): Promise<NaverCandidate[]> {
   const id = process.env.NAVER_CLIENT_ID;
   const secret = process.env.NAVER_CLIENT_SECRET;
   if (!id || !secret) return [];
   const cached = officialCache.get(query);
   if (cached) return cached;
+  if (budget && !budget.take()) return [];
   try {
     const params = new URLSearchParams({ query, display: "5", sort: "random" });
     const res = await fetchWithTimeout(`https://openapi.naver.com/v1/search/local.json?${params}`, {
@@ -153,12 +156,13 @@ export async function attachNaver(
   loc: LatLng,
   region: string | null,
   useUnofficial: boolean,
+  opts: { budget?: Budget; keywordSearches: number; individual: number } = { keywordSearches: 4, individual: 8 },
 ): Promise<{ map: Map<string, NaverReviewInfo>; status: "ok" | "partial" | "failed" | "disabled" }> {
   const result = new Map<string, NaverReviewInfo>();
   let unofficialWorked = false;
 
   if (useUnofficial) {
-    const pools = await Promise.all(keywords.map((k) => naverMapSearch(k, loc)));
+    const pools = await Promise.all(keywords.slice(0, opts.keywordSearches).map((k) => naverMapSearch(k, loc, opts.budget)));
     const pool = pools.flat();
     unofficialWorked = pool.length > 0;
     for (const p of places) {
@@ -167,10 +171,10 @@ export async function attachNaver(
     }
     // 상위 미매칭 장소 개별 검색 (최대 8건)
     if (unofficialWorked) {
-      const missing = places.filter((p) => !result.has(p.id)).slice(0, 8);
+      const missing = places.filter((p) => !result.has(p.id)).slice(0, opts.individual);
       await Promise.all(
         missing.map(async (p) => {
-          const m = matchNaver(p, await naverMapSearch(p.name, p));
+          const m = matchNaver(p, await naverMapSearch(p.name, p, opts.budget));
           if (m) result.set(p.id, m);
         }),
       );
@@ -178,11 +182,11 @@ export async function attachNaver(
   }
 
   if (!unofficialWorked) {
-    const missing = places.filter((p) => !result.has(p.id)).slice(0, 10);
+    const missing = places.filter((p) => !result.has(p.id)).slice(0, opts.individual + opts.keywordSearches);
     await Promise.all(
       missing.map(async (p) => {
         const q = region ? `${region.split(" ").pop()} ${p.name}` : p.name;
-        const m = matchNaver(p, await naverOfficialLocal(q));
+        const m = matchNaver(p, await naverOfficialLocal(q, opts.budget));
         if (m) result.set(p.id, m);
       }),
     );
@@ -217,12 +221,13 @@ function coreName(name: string) {
 /**
  * [공식] 네이버 블로그 검색. "동네 + 가게명"으로 검색하고, 제목/본문에 가게명이 들어간 글만 남긴다.
  */
-export async function naverBlogSearch(name: string, region: string | null): Promise<{ items: BlogReview[]; total: number } | null> {
+export async function naverBlogSearch(name: string, region: string | null, budget?: Budget): Promise<{ items: BlogReview[]; total: number } | null> {
   if (!naverSearchEnabled()) return null;
   const dong = region?.split(" ").pop() ?? "";
   const query = `${dong} ${name}`.trim();
   const cached = blogCache.get(query);
   if (cached !== undefined) return cached;
+  if (budget && !budget.take()) return null;
   try {
     const params = new URLSearchParams({ query, display: "30", sort: "sim" });
     const res = await fetchWithTimeout(`https://openapi.naver.com/v1/search/blog.json?${params}`, { headers: naverHeaders() });
@@ -256,12 +261,13 @@ export async function naverBlogSearch(name: string, region: string | null): Prom
 }
 
 /** [공식] 네이버 이미지 검색 — 카카오 사진이 없을 때 대체 사진으로 쓴다 (네이버 검색 썸네일 주소) */
-export async function naverImageSearch(name: string, region: string | null): Promise<string[] | null> {
+export async function naverImageSearch(name: string, region: string | null, budget?: Budget): Promise<string[] | null> {
   if (!naverSearchEnabled()) return null;
   const dong = region?.split(" ").pop() ?? "";
   const query = `${dong} ${name}`.trim();
   const cached = imageCache.get(query);
   if (cached !== undefined) return cached;
+  if (budget && !budget.take()) return null;
   try {
     const params = new URLSearchParams({ query, display: "12", sort: "sim", filter: "medium" });
     const res = await fetchWithTimeout(`https://openapi.naver.com/v1/search/image?${params}`, { headers: naverHeaders() });

@@ -46,6 +46,8 @@ http://localhost:3000 접속. 휴대폰에서 위치를 쓰려면 HTTPS가 필�
 | `ANTHROPIC_API_KEY` | 선택 | [Claude Console](https://console.anthropic.com) | 자유 입력 해석, 리뷰 기반 재정렬·추천 이유 |
 | `CLAUDE_MODEL` | 선택 | | 기본 `claude-opus-5-5`. 비용을 줄이려면 `claude-haiku-5-5` 등 |
 | `UNOFFICIAL_REVIEWS` | | | `0`이면 비공식 리뷰 수집 끔 |
+| `SUBREQUEST_BUDGET` | | | 요청 한 번에 쓸 외부 호출 수. 기본 48 (Cloudflare 무료 플랜 한도 50). 유료 플랜이면 `500` 등으로 올리면 검색 페이지·리뷰 조회 수가 늘어남 |
+| `RESULT_COUNT` | | | 추천 결과 수. 기본 20 (5~30) |
 | `MOCK_MODE` | | | `1`이면 예시 데이터 사용 |
 
 ## 지도 UI
