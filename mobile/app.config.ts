@@ -35,7 +35,13 @@ const config: ExpoConfig = {
     predictiveBackGestureEnabled: false,
   },
   plugins: [
-    "expo-build-properties",
+    [
+      "expo-build-properties",
+      {
+        // 네이버 지도 Android SDK는 Maven Central이 아니라 네이버 저장소에 있다
+        android: { extraMavenRepos: ["https://repository.map.naver.com/archive/maven"] },
+      },
+    ],
     ["expo-location", { locationWhenInUsePermission: LOCATION_MESSAGE }],
     [
       "@mj-studio/react-native-naver-map",
