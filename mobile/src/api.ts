@@ -99,3 +99,12 @@ export function crawlAi(places: AiClassifyInput[]) {
     body: JSON.stringify({ places }),
   }, 120000);
 }
+
+/** 고른 지역 목록을 서버에 저장 (매일 밤 서버 수집 대상). 서버에 저장소가 없으면 조용히 실패 */
+export function syncRegionsToServer(regions: Region[]) {
+  return request<{ ok: boolean }>("/api/sync/regions", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ regions }),
+  }, 15000);
+}

@@ -224,3 +224,18 @@ export interface CrawlDetailItem {
   attrs: Partial<Record<string, number>>;
   priceLevel: number | null;
 }
+
+/** 지역 수집 결과 파일 (앱 기기 저장 / 서버 야간 수집 결과 공통 형식) */
+export interface RegionFile {
+  version: number;
+  region: Region;
+  places: Record<string, CrawledPlace>;
+  listCursor: CrawlCursor | null;
+  listStarted: boolean;
+  listDone: boolean;
+  doneAt: number | null;
+  /** 서버(야간 수집) 결과를 마지막으로 확인한 시각 */
+  remoteCheckedAt?: number | null;
+  /** 합친 서버 결과의 수집 시각 */
+  remoteDoneAt?: number | null;
+}

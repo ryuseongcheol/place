@@ -10,6 +10,7 @@ import { rankByText, rankByTheme } from "./src/localRank";
 import { PlaceBody, PlaceHeader } from "./src/PlaceDetailView";
 import { ListHeader, PlaceList } from "./src/PlaceList";
 import PlacesMap, { type PlacesMapRef } from "./src/PlacesMap";
+import { registerBackgroundCrawl } from "./src/backgroundCrawl";
 import { RegionsProvider, useRegions } from "./src/regions";
 import SaveSheet, { GroupEditor } from "./src/SaveSheet";
 import SearchPanel from "./src/SearchPanel";
@@ -88,6 +89,10 @@ function MapScreen() {
       .catch((e: Error) => setServerError(e.message));
   }, []);
   useEffect(loadServerInfo, [loadServerInfo]);
+  // 앱이 꺼져 있어도 지역 수집을 이어가도록 백그라운드 작업 등록
+  useEffect(() => {
+    registerBackgroundCrawl();
+  }, []);
 
   const me = loc.status === "locating" ? null : { lat: loc.lat, lng: loc.lng };
   const distanceOf = useCallback((p: ScoredPlace) => (me ? Math.round(haversine(me, p)) : null), [me?.lat, me?.lng]); // eslint-disable-line react-hooks/exhaustive-deps

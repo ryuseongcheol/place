@@ -1,0 +1,56 @@
+name: 지역 맛집 야간 수집
+
+# 앱에서 고른 지역(서버 KV에 저장된 목록)을 매일 밤 통째로 수집·분류해 GitHub Release(region-data)에 올린다.
+# 앱은 켤 때 이 결과를 받아 기기 데이터와 합친다.
+on:
+  schedule:
+    - cron: "17 18 * * *" # 매일 03:17 (한국 시간)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: region-crawl
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 이전 결과 받기 (이어서 수집)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p region-data
+          gh release download region-data -D region-data -p 'region-*.json' --clobber || echo "이전 결과 없음"
+
+      - name: 수집
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
+          API_BASE: ${{ vars.API_BASE || 'https://place.spikeryu.workers.dev' }}
+        run: npx tsx scripts/crawl-regions.ts
+
+      - name: 결과 올리기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(region-data/region-*.json)
+          if [ ${#files[@]} -eq 0 ]; then echo "올릴 결과 없음"; exit 0; fi
+          gh release view region-data >/dev/null 2>&1 || gh release create region-data --title "지역 맛집 수집 결과" --notes "매일 밤 자동 수집. 앱이 자동으로 받아 갑니다." --prerelease
+          gh release upload region-data "${files[@]}" --clobber
+          ls -lh region-data

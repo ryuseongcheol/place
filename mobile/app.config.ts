@@ -35,6 +35,7 @@ const config: ExpoConfig = {
     predictiveBackGestureEnabled: false,
   },
   plugins: [
+    "expo-background-task",
     [
       "expo-build-properties",
       {

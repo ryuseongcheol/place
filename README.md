@@ -48,6 +48,7 @@ http://localhost:3000 접속. 휴대폰에서 위치를 쓰려면 HTTPS가 필�
 | `CLAUDE_MODEL` | 선택 | | 기본 `claude-opus-5-5`. 비용을 줄이려면 `claude-haiku-5-5` 등 |
 | `UNOFFICIAL_REVIEWS` | | | `0`이면 비공식 리뷰 수집 끔 |
 | `SUBREQUEST_BUDGET` | | | 요청 한 번에 쓸 외부 호출 수. 기본 48 (Cloudflare 무료 플랜 한도 50). 유료 플랜이면 `500` 등으로 올리면 검색 페이지·리뷰 조회 수가 늘어남 |
+| KV 바인딩 `DATA` | 야간 수집 시 | Cloudflare > Storage & Databases > KV 생성 후 `wrangler.jsonc`의 `kv_namespaces` | 앱이 고른 지역 목록 저장 |
 | `RESULT_COUNT` | | | 추천 결과 수. 기본 20 (5~30) |
 | `MOCK_MODE` | | | `1`이면 예시 데이터 사용 |
 
@@ -77,6 +78,9 @@ app/
   api/regions/route.ts    동 이름 검색 / 현재 위치의 동
   api/crawl/list/route.ts 지역 식당 목록 수집 (커서로 이어받기)
   api/crawl/detail/route.ts 식당 상세 + 숨은 분류값 (앱이 직접 못 받을 때)
+  api/crawl/ai/route.ts   수집한 식당 AI 분류
+  api/sync/regions/route.ts 앱이 고른 지역 목록 저장 (KV) — 야간 수집이 읽음
+scripts/crawl-regions.ts  매일 밤 서버 수집 (GitHub Actions)
   api/themes/route.ts     테마 목록 + 설정 상태
 lib/
   recommend.ts          전체 파이프라인
