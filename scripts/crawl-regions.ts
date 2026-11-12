@@ -18,7 +18,9 @@ import { classify, mergeAttrs, type Attrs } from "../lib/classify";
 import { crawlListChunk } from "../lib/crawl";
 import { detailFromRaw } from "../lib/detailFromRaw";
 import { fetchKakaoRaw } from "../lib/kakao";
-import { matchNaver, naverMapSearch } from "../lib/naver";
+import { matchNaver, naverMapSearch, naverSearchEnabled, naverShowSearch } from "../lib/naver";
+import { applyShows, mergeShows } from "../lib/shows";
+import { inlineSql, upsertStatements } from "../lib/placeRow";
 import type { AiClassifyInput, BasePlace, CrawlCursor, CrawledPlace, Region, RegionFile } from "../lib/types";
 import { haversine, mapLimit } from "../lib/util";
 
@@ -130,11 +132,25 @@ async function crawlRegion(region: Region) {
       detailAt: Date.now(),
       detailFailed: !d.ok,
       aiAt: null,
+      shows: mergeShows(p.shows, d.shows),
     };
   });
   log(`상세 대상 ${targets.length}곳: 카카오 성공 ${ok} / 실패 ${fail}, 네이버 매칭 ${naverOk}`);
 
-  // 3) AI 분류: 상세가 새로 바뀐 곳만
+  // 3) 방송·가이드 출연 확인 (네이버 블로그 검색): 처음이거나 30일 지난 곳
+  if (naverSearchEnabled()) {
+    const showTargets = Object.values(places).filter((p) => p.detailAt && (!p.showsCheckedAt || Date.now() - p.showsCheckedAt > 30 * 86_400_000));
+    let found = 0;
+    await mapLimit(showTargets, 6, async (p) => {
+      const shows = await naverShowSearch(p.name, region.name);
+      if (shows === null) return;
+      places[p.id] = applyShows(places[p.id], shows);
+      if (shows.length) found++;
+    });
+    log(`방송 출연 확인 ${showTargets.length}곳 → 출연 ${found}곳`);
+  } else log("네이버 검색 키 없음: 블로그로 방송 출연 확인은 건너뜀 (카카오 상세에서 찾은 것만)");
+
+  // 4) AI 분류: 상세가 새로 바뀐 곳만
   if (aiClassifyEnabled()) {
     const aiTargets = Object.values(places).filter((p) => p.detailAt && !p.aiAt);
     let done = 0;
@@ -165,7 +181,10 @@ async function crawlRegion(region: Region) {
     doneAt: Date.now(),
   };
   writeFileSync(file, JSON.stringify(out));
-  log(`저장: ${file}`);
+  // DB(D1)에 넣을 SQL: 워크플로가 wrangler d1 execute 로 실행
+  const sql = Object.values(places).flatMap(upsertStatements).map(inlineSql).join("\n");
+  writeFileSync(join(OUT_DIR, `upsert-${safeId(region.id)}.sql`), sql);
+  log(`저장: ${file} (+ DB용 SQL)`);
 }
 
 async function main() {

@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { fetchPlaceDetail } from "./api";
 import { naverMapSearchUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
+import { mergeShows } from "./shared";
+import ShowBadges from "./ShowBadges";
 import { callPhone, openKakaoMap, openNaverMap } from "./openMap";
 import type { Colors } from "./theme";
 import type { PlaceDetail, ScoredPlace } from "./types";
@@ -52,6 +54,7 @@ export function PlaceHeader({
             {!!p.naver?.blogReviewCount && <Text style={{ fontSize: 13, color: c.muted }}>블로그 {p.naver.blogReviewCount.toLocaleString()}</Text>}
             {distance != null && <Text style={{ fontSize: 13, color: c.muted }}>{formatDistance(distance)}</Text>}
           </View>
+          <ShowBadges shows={p.shows} />
         </View>
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기" style={styles.iconBtn}>
           <Text style={{ fontSize: 18, color: c.muted }}>✕</Text>
@@ -125,6 +128,13 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
         <Action c={c} icon="☎" label="전화" disabled={!p.phone} onPress={() => p.phone && callPhone(p.phone)} />
         <Action c={c} icon="K" label="카카오맵" onPress={() => openKakaoMap(p)} />
       </View>
+
+      {/* 상세에서 새로 확인된 방송·가이드 출연 (목록에는 없던 것) */}
+      {detail && mergeShows(detail.shows).filter((s) => !(p.shows ?? []).includes(s)).length > 0 && (
+        <View style={{ paddingHorizontal: 16 }}>
+          <ShowBadges shows={detail.shows.filter((s) => !(p.shows ?? []).includes(s))} />
+        </View>
+      )}
 
       {/* 사진 */}
       {loading && !detail ? (

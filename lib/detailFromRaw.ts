@@ -1,5 +1,6 @@
 import { classify } from "./classify";
 import { extractKakaoReviews, extractMenus, extractOpenHours, parseKakaoDetail } from "./kakaoDetail";
+import { detectShows } from "./shows";
 import type { BasePlace, CrawlDetailItem } from "./types";
 
 /** 카카오 외에 함께 반영할 정보 (네이버 키워드 리뷰·리뷰 수) */
@@ -17,6 +18,8 @@ export function detailFromRaw(p: Pick<BasePlace, "id" | "name" | "category">, ra
   const openHours = raw ? extractOpenHours(raw) : [];
   const tags = summary?.tags ?? [];
   const snippets = reviews.map((r) => r.text);
+  // 방송·가이드 출연: 카카오 상세 원본 전체(방송 정보·후기·태그)와 네이버 키워드 리뷰에서
+  const shows = detectShows([raw ? JSON.stringify(raw) : null, ...(extra.keywords ?? [])]);
   const { attrs, priceLevel } = classify({
     name: p.name,
     category: p.category,
@@ -29,10 +32,12 @@ export function detailFromRaw(p: Pick<BasePlace, "id" | "name" | "category">, ra
     ratingCount: summary?.ratingCount ?? 0,
     reviewCount: (summary?.reviewCount ?? 0) + (extra.visitorReviewCount ?? 0),
     blogReviewCount: (summary?.blogReviewCount ?? 0) + (extra.blogReviewCount ?? 0),
+    shows,
   });
   return {
     id: p.id,
     ok: Boolean(raw),
+    shows,
     rating: summary?.rating ?? null,
     ratingCount: summary?.ratingCount ?? 0,
     reviewCount: summary?.reviewCount ?? 0,

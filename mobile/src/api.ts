@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import type { AiClassifyInput, BasePlace, CrawlCursor, CrawlDetailItem, CrawlListResponse, PlaceDetail, RecommendResponse, Region } from "./types";
+import type { AiClassifyInput, BasePlace, CrawlCursor, CrawledPlace, ScoredPlace, CrawlDetailItem, CrawlListResponse, PlaceDetail, RecommendResponse, Region } from "./types";
 
 export interface PresetChip {
   id: string;
@@ -107,4 +107,30 @@ export function syncRegionsToServer(regions: Region[]) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ regions }),
   }, 15000);
+}
+
+/** 서버 DB에서 위치·주제/검색어로 추천 */
+export function searchDb(p: { lat: number; lng: number; radius: number; themeId?: string | null; q?: string | null }) {
+  const qs = new URLSearchParams({ lat: String(p.lat), lng: String(p.lng), radius: String(p.radius) });
+  if (p.themeId) qs.set("theme", p.themeId);
+  if (p.q) qs.set("q", p.q);
+  return request<{ places: ScoredPlace[]; inArea: number; analyzed: number }>(`/api/db/search?${qs}`, undefined, 20000);
+}
+
+/** 기기에서 수집한 식당을 서버 DB에 올림 */
+export function uploadPlaces(places: CrawledPlace[]) {
+  return request<{ ok: boolean; saved: number }>("/api/db/places", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ places }),
+  }, 30000);
+}
+
+/** 수집한 식당들의 방송·가이드 출연 확인 (서버가 네이버 블로그 검색) */
+export function crawlShows(region: Region, places: Array<Pick<CrawledPlace, "id" | "name">>) {
+  return request<{ items: Array<{ id: string; shows: string[] }> }>("/api/crawl/shows", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ region: { lat: region.lat, lng: region.lng }, places: places.map((p) => ({ id: p.id, name: p.name })) }),
+  }, 60000);
 }

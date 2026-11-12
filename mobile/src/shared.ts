@@ -3,3 +3,4 @@ export { ATTR_LABELS, attrFit, classify, mergeAttrs, topReasons, type AttrKey, t
 export { THEME_PRESETS, getPreset, type ThemePreset } from "../../lib/themes";
 export { detailFromRaw } from "../../lib/detailFromRaw";
 export { haversine, nameSimilarity, normalizeName, toNumber } from "../../lib/util";
+export { SHOWS, applyShows, mergeShows, showKind, showLabel } from "../../lib/shows";

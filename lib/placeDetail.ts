@@ -8,7 +8,8 @@ import {
   extractPhotos,
 } from "./kakaoDetail";
 import { mockDetail } from "./mock";
-import { naverBlogSearch, naverImageSearch, naverPlaceLinks, naverSearchEnabled } from "./naver";
+import { naverBlogSearch, naverImageSearch, naverPlaceLinks, naverSearchEnabled, naverShowSearch } from "./naver";
+import { detectShows, detectShowsInPosts, mergeShows } from "./shows";
 import { isMockMode } from "./recommend";
 import type { PlaceDetail } from "./types";
 
@@ -27,9 +28,10 @@ export async function getPlaceDetail(req: DetailRequest): Promise<PlaceDetail> {
   const isKakaoId = /^\d+$/.test(req.id);
   const region = await regionName({ lat: req.lat, lng: req.lng });
 
-  const [raw, blog] = await Promise.all([
+  const [raw, blog, showPosts] = await Promise.all([
     useUnofficial && isKakaoId ? fetchKakaoRaw(req.id) : Promise.resolve(null),
     naverBlogSearch(req.name, region),
+    naverShowSearch(req.name, region),
   ]);
 
   let photos = raw ? extractPhotos(raw) : [];
@@ -66,6 +68,12 @@ export async function getPlaceDetail(req: DetailRequest): Promise<PlaceDetail> {
       naverVisitorReviews: naver.visitor,
       naverBlogReviews: naver.blog,
     },
+    // 방송·가이드 출연: 카카오 상세 + 블로그(가게 이름과 함께 언급된 글)
+    shows: mergeShows(
+      raw ? detectShows([JSON.stringify(raw)]) : [],
+      detectShowsInPosts(blog?.items.map((b) => ({ title: b.title, snippet: b.snippet })) ?? [], req.name),
+      showPosts,
+    ),
     sources: {
       kakaoDetail: !useUnofficial ? "disabled" : raw ? "ok" : "failed",
       naverBlog: !naverSearchEnabled() ? "disabled" : blog ? "ok" : "failed",

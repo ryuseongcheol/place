@@ -2,7 +2,7 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import { fetchRecommendations, fetchThemes } from "./src/api";
+import { fetchRecommendations, fetchThemes, searchDb } from "./src/api";
 import BottomSheet, { type BottomSheetRef, type SheetSnap } from "./src/BottomSheet";
 import { FavoritesProvider, colorHex, useFavorites, type FavGroup } from "./src/favorites";
 import { FavGroupsHeader, FavGroupsList } from "./src/FavoritesView";
@@ -119,13 +119,26 @@ function MapScreen() {
       let next: Results;
       if (source.kind === "nearby") {
         if (loc.status === "locating") return;
-        const res = await fetchRecommendations({ lat: loc.lat, lng: loc.lng, radius, presetId: theme?.id ?? null, text: q || null });
-        next = {
-          places: res.places,
-          title: res.query.summary,
-          subtitle: `내 주변 ${radius < 1000 ? `${radius}m` : `${radius / 1000}km`} · 검색어 ${res.query.keywords.join(", ")}`,
-          warnings: res.warnings,
-        };
+        const radiusText = radius < 1000 ? `${radius}m` : `${radius / 1000}km`;
+        // 1) 서버 DB에 이 근처를 분석해 둔 데이터가 충분하면 바로 (빠르고, 분류값이 정확함)
+        const db = await searchDb({ lat: loc.lat, lng: loc.lng, radius, themeId: theme?.id ?? null, q: q || null }).catch(() => null);
+        if (db && db.analyzed >= 30 && db.places.length >= 8) {
+          next = {
+            places: db.places,
+            title: q || theme!.label,
+            subtitle: `내 주변 ${radiusText} · 저장된 ${db.inArea.toLocaleString()}곳 중 (분석 ${db.analyzed.toLocaleString()}곳)`,
+            warnings: [],
+          };
+        } else {
+          // 2) 아니면 실시간 (카카오 검색 + 리뷰 수집)
+          const res = await fetchRecommendations({ lat: loc.lat, lng: loc.lng, radius, presetId: theme?.id ?? null, text: q || null });
+          next = {
+            places: res.places,
+            title: res.query.summary,
+            subtitle: `내 주변 ${radiusText} · 실시간 · 검색어 ${res.query.keywords.join(", ")}`,
+            warnings: res.warnings,
+          };
+        }
       } else {
         const region = source.region;
         const places = await rg.loadPlaces(region.id);

@@ -51,6 +51,8 @@ export interface ScoredPlace extends BasePlace {
   attrs?: Partial<Record<string, number>>;
   /** 주제 적합도 0~100 */
   fit?: number;
+  /** 출연한 방송·가이드 id (lib/shows.ts) */
+  shows?: string[];
 }
 
 export interface ThemeQuery {
@@ -134,6 +136,8 @@ export interface PlaceDetail {
     naverBlogReviews: string;
   };
   sources: { kakaoDetail: SourceStatus; naverBlog: SourceStatus; naverImage: SourceStatus };
+  /** 출연한 방송·가이드 id */
+  shows: string[];
 }
 
 // ---------- 지역 미리 수집 (/api/regions, /api/crawl) ----------
@@ -195,6 +199,12 @@ export interface CrawledPlace extends BasePlace {
   ruleAttrs?: Partial<Record<string, number>>;
   /** AI 분류를 마친 시각 */
   aiAt?: number | null;
+  /** 서버 DB에 올린 시각 (앱) */
+  dbAt?: number | null;
+  /** 출연한 방송·가이드 id */
+  shows?: string[];
+  /** 블로그로 방송 출연을 확인한 시각 */
+  showsCheckedAt?: number | null;
 }
 
 /** AI 분류 요청 한 곳 분량 */
@@ -212,6 +222,7 @@ export interface AiClassifyInput {
 export interface CrawlDetailItem {
   id: string;
   ok: boolean;
+  shows: string[];
   rating: number | null;
   ratingCount: number;
   reviewCount: number;

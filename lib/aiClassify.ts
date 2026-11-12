@@ -11,7 +11,7 @@ import type { AiClassifyInput } from "./types";
  */
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-opus-5-5";
-const AI_KEYS = ATTR_KEYS.filter((k) => k !== "hiddenGem" && k !== "hot") as Exclude<AttrKey, "hiddenGem" | "hot">[];
+const AI_KEYS = ATTR_KEYS.filter((k) => !["hiddenGem", "hot", "tvShow", "guide"].includes(k)) as Exclude<AttrKey, "hiddenGem" | "hot" | "tvShow" | "guide">[];
 
 const Schema = z.object({
   items: z.array(

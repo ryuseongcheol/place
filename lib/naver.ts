@@ -1,4 +1,5 @@
 import { formatDate, normalizeImageUrl, stripTags } from "./kakaoDetail";
+import { detectShowsInPosts } from "./shows";
 import type { Budget } from "./budget";
 import type { BasePlace, BlogReview, LatLng, NaverReviewInfo } from "./types";
 import { BROWSER_UA, TTLCache, collectStrings, deepFind, fetchWithTimeout, haversine, nameSimilarity, normalizeName, toNumber } from "./util";
@@ -325,4 +326,35 @@ export function naverPlaceLinks(naverId: string | null, name: string, region: st
   // 장소 id를 모르면 네이버 지도 검색 (통합검색은 블로그 결과가 먼저 나와서 리뷰 링크로 쓰지 않는다)
   const mapSearch = `https://m.map.naver.com/search2/search.naver?query=${q}`;
   return { place: mapSearch, visitor: mapSearch, blog: `https://m.search.naver.com/search.naver?where=m_blog&query=${q}` };
+}
+
+const showCache = new TTLCache<string[] | null>(24 * 60 * 60 * 1000, 2000);
+
+/**
+ * [공식] 블로그 검색으로 방송·유튜브·가이드 출연 확인.
+ * "동네 가게명 방송"으로 찾고, 같은 글에 가게 이름과 프로그램 이름이 함께 있는 경우만 인정한다.
+ * 키가 없거나 실패하면 null.
+ */
+export async function naverShowSearch(name: string, region: string | null, budget?: Budget): Promise<string[] | null> {
+  const cfg = naverSearchConfig();
+  if (!cfg) return null;
+  const dong = region?.split(" ").pop() ?? "";
+  const query = `${dong} ${name} 방송 맛집`.trim();
+  const cached = showCache.get(query);
+  if (cached !== undefined) return cached;
+  if (budget && !budget.take()) return null;
+  try {
+    const params = new URLSearchParams({ query, display: "40", sort: "sim" });
+    const res = await fetchWithTimeout(`${cfg.url("blog")}?${params}`, { headers: cfg.headers });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = (await res.json()) as { items: Array<{ title: string; description: string }> };
+    const shows = detectShowsInPosts(
+      data.items.map((it) => ({ title: stripTags(it.title), snippet: stripTags(it.description) })),
+      name,
+    );
+    showCache.set(query, shows);
+    return shows;
+  } catch {
+    return null;
+  }
 }

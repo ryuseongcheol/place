@@ -32,6 +32,8 @@ export const ATTR_KEYS = [
   "waiting", // 웨이팅·줄
   "hiddenGem", // 숨은 맛집 (평점 높고 덜 알려짐)
   "hot", // 핫플 (리뷰 많음)
+  "tvShow", // 유명 맛집 방송·유튜브 출연 (lib/shows.ts)
+  "guide", // 미쉐린·블루리본
 ] as const;
 
 export type AttrKey = (typeof ATTR_KEYS)[number];
@@ -65,6 +67,8 @@ export const ATTR_LABELS: Record<AttrKey, string> = {
   waiting: "웨이팅 있는 인기",
   hiddenGem: "아는 사람만 아는 곳",
   hot: "요즘 핫한 곳",
+  tvShow: "방송에 나온 맛집",
+  guide: "미쉐린·블루리본",
 };
 
 const DICT: Partial<Record<AttrKey, string[]>> = {
@@ -105,6 +109,8 @@ export interface ClassifyInput {
   ratingCount?: number;
   reviewCount?: number;
   blogReviewCount?: number;
+  /** 출연한 방송·가이드 id (lib/shows.ts) */
+  shows?: string[];
 }
 
 export interface ClassifyResult {
@@ -194,6 +200,14 @@ export function classify(input: ClassifyInput): ClassifyResult {
   if (volume >= 150) attrs.hot = Math.min(1, Math.log10(volume) / 3);
   if (attrs.waiting) attrs.hot = Math.max(attrs.hot ?? 0, attrs.waiting * 0.8);
 
+  // 방송·가이드 출연 (근거가 있을 때만)
+  const shows = input.shows ?? [];
+  if (shows.some((s) => s !== "michelin" && s !== "blueribbon")) attrs.tvShow = 1;
+  if (shows.some((s) => s === "michelin" || s === "blueribbon")) {
+    attrs.guide = 1;
+    attrs.premium = Math.max(attrs.premium ?? 0, shows.includes("michelin") ? 0.6 : 0.3);
+  }
+
   // 정리: 0.05 미만 버리고 소수 둘째 자리
   for (const k of Object.keys(attrs) as AttrKey[]) {
     const v = attrs[k]!;
@@ -244,7 +258,8 @@ export function mergeAttrs(rule: Attrs, ai: Attrs): Attrs {
   for (const k of ATTR_KEYS) {
     const r = rule[k] ?? 0;
     const a = ai[k] ?? 0;
-    const v = k === "hiddenGem" || k === "hot" ? r : 0.35 * r + 0.65 * a;
+    // 평판·출연처럼 근거로 계산한 값은 규칙 결과를 그대로 쓴다
+    const v = k === "hiddenGem" || k === "hot" || k === "tvShow" || k === "guide" ? r : 0.35 * r + 0.65 * a;
     if (v >= 0.05) out[k] = Math.round(v * 100) / 100;
   }
   return out;

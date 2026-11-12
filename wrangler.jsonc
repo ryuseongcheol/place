@@ -23,5 +23,14 @@
 			"id": "f467d849f19d4e569de5d0fba93df0cc"
 		}
 	],
+	"d1_databases": [
+		{
+			// 수집한 식당·분류값 DB (lib/db.ts, migrations/). 매일 밤 GitHub Actions와 앱 수집 결과가 쌓인다
+			"binding": "DB",
+			"database_name": "matjip",
+			"database_id": "034c2ce4-1ab9-4d3b-88f3-3c5fb4e8e59b",
+			"migrations_dir": "migrations"
+		}
+	],
 	"observability": { "enabled": true }
 }

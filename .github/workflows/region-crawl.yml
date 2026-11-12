@@ -41,8 +41,23 @@ jobs:
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
+          NAVER_HUB_CLIENT_ID: ${{ secrets.NAVER_HUB_CLIENT_ID }}
+          NAVER_HUB_CLIENT_SECRET: ${{ secrets.NAVER_HUB_CLIENT_SECRET }}
           API_BASE: ${{ vars.API_BASE || 'https://place.spikeryu.workers.dev' }}
         run: npx tsx scripts/crawl-regions.ts
+
+      - name: DB(D1)에 저장
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: a9f9309f44c04c71c5922511f5537f07
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "CLOUDFLARE_API_TOKEN이 없어 DB 저장은 건너뜁니다"; exit 0; fi
+          shopt -s nullglob
+          npx wrangler d1 execute matjip --remote --file migrations/0001_init.sql -y
+          for f in region-data/upsert-*.sql; do
+            echo "== $f ($(wc -c < "$f") bytes)"
+            npx wrangler d1 execute matjip --remote --file "$f" -y
+          done
 
       - name: 결과 올리기
         env:
@@ -50,6 +65,7 @@ jobs:
         run: |
           shopt -s nullglob
           files=(region-data/region-*.json)
+          rm -f region-data/upsert-*.sql
           if [ ${#files[@]} -eq 0 ]; then echo "올릴 결과 없음"; exit 0; fi
           gh release view region-data >/dev/null 2>&1 || gh release create region-data --title "지역 맛집 수집 결과" --notes "매일 밤 자동 수집. 앱이 자동으로 받아 갑니다." --prerelease
           gh release upload region-data "${files[@]}" --clobber

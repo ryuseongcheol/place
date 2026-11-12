@@ -1,10 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Directory, File, Paths } from "expo-file-system";
 import { Platform } from "react-native";
-import { crawlAi, crawlDetail, crawlList } from "./api";
+import { crawlAi, crawlDetail, crawlList, crawlShows, uploadPlaces } from "./api";
 import { deviceKakaoBlocked, fetchKakaoRawDevice } from "./kakaoDevice";
 import { lookupNaverPlace, naverDeviceBlocked, type NaverPlaceInfo } from "./naverDevice";
-import { classify, detailFromRaw, haversine, mergeAttrs, type Attrs } from "./shared";
+import { applyShows, classify, detailFromRaw, haversine, mergeAttrs, mergeShows, type Attrs } from "./shared";
 import type { AiClassifyInput, BasePlace, CrawlDetailItem, CrawledPlace, Region, RegionFile } from "./types";
 
 /**
@@ -28,7 +28,7 @@ const REMOTE_BASE = (process.env.EXPO_PUBLIC_REGION_DATA_URL || "https://github.
 const REMOTE_CHECK_INTERVAL = 3 * 60 * 60 * 1000;
 
 export interface RegionProgress {
-  phase: "waiting" | "listing" | "detail" | "ai" | "done" | "error";
+  phase: "waiting" | "listing" | "detail" | "shows" | "ai" | "done" | "error";
   listed: number;
   detailed: number;
   target: number;
@@ -79,7 +79,35 @@ export async function readRegionFile(id: string): Promise<RegionFile | null> {
 
 const cache = new Map<string, CrawledPlace[]>();
 
-async function writeRegionFile(data: RegionFile) {
+// ---------- 서버 DB 올리기 ----------
+
+let dbUnavailable = false;
+let uploading = false;
+
+/** 상세·AI가 바뀐 식당을 서버 DB에 올린다 (실패해도 수집에는 영향 없음, 다음 저장 때 다시) */
+async function uploadChanged(data: RegionFile) {
+  if (dbUnavailable || uploading) return;
+  const changed = Object.values(data.places).filter(
+    (p) => /^\d+$/.test(p.id) && p.detailAt && Math.max(p.detailAt ?? 0, p.aiAt ?? 0, p.showsCheckedAt ?? 0) > (p.dbAt ?? 0),
+  );
+  if (!changed.length) return;
+  uploading = true;
+  try {
+    for (let i = 0; i < changed.length; i += 25) {
+      const batch = changed.slice(i, i + 25);
+      await uploadPlaces(batch.map(({ dbAt: _d, ...rest }) => rest));
+      const now = Date.now();
+      for (const p of batch) if (data.places[p.id]) data.places[p.id] = { ...data.places[p.id], dbAt: now };
+    }
+  } catch (e) {
+    if (e instanceof Error && /DB가 연결되지/.test(e.message)) dbUnavailable = true;
+  } finally {
+    uploading = false;
+  }
+}
+
+async function writeRegionFile(data: RegionFile, upload = true) {
+  if (upload) await uploadChanged(data);
   const json = JSON.stringify(data);
   if (!dir) await AsyncStorage.setItem(`regionfile:${safeId(data.region.id)}`, json);
   else {
@@ -199,8 +227,10 @@ function applyDetail(p: CrawledPlace, d: CrawlDetailItem, naver: NaverPlaceInfo 
     detailAt: Date.now(),
     detailFailed: !d.ok,
     aiAt: null,
+    shows: mergeShows(p.shows, d.shows),
   };
 }
+
 
 function aiInput(p: CrawledPlace): AiClassifyInput {
   return {
@@ -236,6 +266,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let running = false;
 let aiUnavailable = false;
+let showsUnavailable = false;
 const errored = new Set<string>();
 const finished = new Set<string>();
 
@@ -351,7 +382,31 @@ async function crawlRegion(region: Region, outOfTime: () => boolean, stillSelect
   }
   await writeRegionFile(data);
 
-  // 3) AI 분류 (서버에 ANTHROPIC_API_KEY가 있을 때만). 상세를 받은 곳만, 규칙 분류와 섞는다
+  // 3) 방송·가이드 출연 확인 (서버가 네이버 블로그 검색. 네이버 검색 키가 있을 때만)
+  if (!showsUnavailable) {
+    const showTargets = Object.values(data.places)
+      .filter((p) => p.detailAt && !p.showsCheckedAt)
+      .sort((a, b) => a.distance - b.distance);
+    if (showTargets.length) {
+      data.doneAt = null;
+      setP(region.id, { phase: "shows" });
+    }
+    for (let j = 0; j < showTargets.length; j += 30) {
+      if (!stillSelected(region.id) || outOfTime()) return "paused";
+      try {
+        const res = await crawlShows(region, showTargets.slice(j, j + 30));
+        for (const it of res.items) if (data.places[it.id]) data.places[it.id] = applyShows(data.places[it.id], it.shows);
+        await writeRegionFile(data);
+      } catch (e) {
+        if (e instanceof Error && /키가 없어/.test(e.message)) {
+          showsUnavailable = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // 4) AI 분류 (서버에 ANTHROPIC_API_KEY가 있을 때만). 상세를 받은 곳만, 규칙 분류와 섞는다
   if (!aiUnavailable) {
     const aiTargets = Object.values(data.places).filter((p) => p.detailAt && !p.aiAt && !p.id.startsWith("mock-"));
     let aiDone = Object.values(data.places).filter((p) => p.aiAt).length;

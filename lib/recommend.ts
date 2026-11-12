@@ -3,6 +3,7 @@ import { planFor, requestBudget } from "./budget";
 import { classify, type Attrs } from "./classify";
 import { fetchKakaoRaw, parseKakaoDetail, regionName, searchKakao } from "./kakao";
 import { extractKakaoReviews, extractMenus, extractOpenHours } from "./kakaoDetail";
+import { detectShows } from "./shows";
 import { mockKakao, mockNaver, mockPlaces } from "./mock";
 import { attachNaver } from "./naver";
 import { scorePlace } from "./score";
@@ -128,11 +129,15 @@ export async function recommend(req: RecommendRequest): Promise<RecommendRespons
 
   // 4) 점수 계산
   // 숨은 분류값 계산 (카카오 상세 원본 + 네이버 키워드 리뷰)
+  const showsMap = new Map<string, string[]>();
   const attrsOf = (p: BasePlace): Attrs => {
     const raw = rawMap.get(p.id);
     const kakao = kakaoMap.get(p.id) ?? null;
     const naver = naverMap.get(p.id) ?? null;
+    const shows = detectShows([raw ? JSON.stringify(raw) : null, ...(naver?.keywords ?? []), ...(kakao?.snippets ?? [])]);
+    if (shows.length) showsMap.set(p.id, shows);
     return classify({
+      shows,
       name: p.name,
       category: p.category,
       menus: raw ? extractMenus(raw) : [],
@@ -145,9 +150,10 @@ export async function recommend(req: RecommendRequest): Promise<RecommendRespons
       blogReviewCount: (kakao?.blogReviewCount ?? 0) + (naver?.blogReviewCount ?? 0),
     }).attrs;
   };
-  let scored: ScoredPlace[] = candidates.map((p) =>
-    scorePlace(p, kakaoMap.get(p.id) ?? null, naverMap.get(p.id) ?? null, query, radius, candidates.length, attrsOf(p)),
-  );
+  let scored: ScoredPlace[] = candidates.map((p) => ({
+    ...scorePlace(p, kakaoMap.get(p.id) ?? null, naverMap.get(p.id) ?? null, query, radius, candidates.length, attrsOf(p)),
+    shows: showsMap.get(p.id) ?? [],
+  }));
   scored.sort((a, b) => b.score - a.score);
 
   // 5) AI 재정렬 + 추천 이유 (상위 15곳 대상)

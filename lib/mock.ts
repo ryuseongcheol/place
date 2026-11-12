@@ -118,6 +118,7 @@ export function mockDetail(id: string, name: string): PlaceDetail {
       naverBlogReviews: `https://m.search.naver.com/search.naver?where=m_blog&query=${q}`,
     },
     sources: { kakaoDetail: "mock", naverBlog: "mock", naverImage: "mock" },
+    shows: Number(id.replace("mock-", "")) % 4 === 0 ? ["wednesday", "meokeultende"] : [],
   };
 }
 

@@ -179,6 +179,17 @@ export const THEME_PRESETS: ThemePreset[] = [
     weights: W(0.3, 0.4, 0.25, 0.05),
   },
   {
+    id: "tv",
+    label: "방송에 나온 맛집",
+    emoji: "📺",
+    description: "수요미식회·흑백요리사·먹을텐데 등 방송·유튜브·미쉐린에 소개된 곳",
+    keywords: ["맛집", "한식", "일식", "양식", "중식", "고깃집"],
+    includeCafe: true,
+    avoid: [],
+    attrs: { tvShow: 1, guide: 0.7, hot: 0.2 },
+    weights: W(0.35, 0.25, 0.35, 0.05),
+  },
+  {
     id: "light",
     label: "가볍고 건강하게",
     emoji: "🥗",

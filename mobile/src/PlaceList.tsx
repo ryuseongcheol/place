@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { formatDistance } from "./PlaceDetailView";
+import ShowBadges from "./ShowBadges";
 import type { Colors } from "./theme";
 import type { ScoredPlace } from "./types";
 
@@ -66,6 +67,7 @@ export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, nu
                   .filter(Boolean)
                   .join(" · ")}
               </Text>
+              <ShowBadges shows={p.shows} size="sm" />
               {numbered && (
                 <Text style={{ fontSize: 13, lineHeight: 19, color: c.text, marginTop: 5 }} numberOfLines={2}>
                   {p.reason}
