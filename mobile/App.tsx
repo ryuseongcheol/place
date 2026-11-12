@@ -10,6 +10,7 @@ import { rankByText, rankByTheme } from "./src/localRank";
 import { PlaceBody, PlaceHeader } from "./src/PlaceDetailView";
 import { ListHeader, PlaceList } from "./src/PlaceList";
 import PlacesMap, { type PlacesMapRef } from "./src/PlacesMap";
+import { checkLatestRelease } from "./src/appVersion";
 import { registerBackgroundCrawl } from "./src/backgroundCrawl";
 import { RegionsProvider, useRegions } from "./src/regions";
 import SaveSheet, { GroupEditor } from "./src/SaveSheet";
@@ -92,6 +93,11 @@ function MapScreen() {
   // 앱이 꺼져 있어도 지역 수집을 이어가도록 백그라운드 작업 등록
   useEffect(() => {
     registerBackgroundCrawl();
+  }, []);
+  // 새 버전이 있으면 설정 버튼에 표시
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => {
+    checkLatestRelease().then((r) => setUpdateAvailable(Boolean(r?.newer)));
   }, []);
 
   const me = loc.status === "locating" ? null : { lat: loc.lat, lng: loc.lng };
@@ -342,6 +348,7 @@ function MapScreen() {
           activeThemeId={activeThemeId}
           onPickTheme={pickTheme}
           onOpenSettings={() => setSettingsOpen(true)}
+          settingsBadge={updateAvailable}
         />
       )}
 

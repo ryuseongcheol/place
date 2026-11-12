@@ -1,4 +1,8 @@
-name: Android APK (테스트용)
+name: Android APK
+
+# 빌드 → 에뮬레이터 실행 점검 → 통과하면 버전 Release 게시
+# - 버전(1.1.0)은 mobile/app.config.ts 의 APP_VERSION, 빌드 번호는 이 워크플로의 실행 번호
+# - Release: android-v<버전>-<빌드> (변경 내역 자동), 고정 링크 android-test/matjip-latest.apk 도 갱신
 
 on:
   workflow_dispatch:
@@ -16,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write # 테스트용 Release에 APK를 올리기 위해
+  contents: write # Release에 APK를 올리기 위해
 
 jobs:
   build:
@@ -28,6 +32,10 @@ jobs:
     env:
       EXPO_PUBLIC_API_URL: ${{ inputs.api_url || 'https://place.spikeryu.workers.dev' }}
       NODE_OPTIONS: --max-old-space-size=4096
+      APP_BUILD_NUMBER: ${{ github.run_number }}
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      build: ${{ steps.ver.outputs.build }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +52,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: 버전 정하기
+        id: ver
+        run: |
+          VERSION=$(node -e "console.log(require('fs').readFileSync('app.config.ts','utf8').match(/APP_VERSION = \"([^\"]+)\"/)[1])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$APP_BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "APP_COMMIT=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "APK_NAME=matjip-$VERSION-$APP_BUILD_NUMBER.apk" >> "$GITHUB_ENV"
+          echo "버전 $VERSION (빌드 $APP_BUILD_NUMBER, 커밋 ${GITHUB_SHA::7})"
+
       - name: Install dependencies
         run: npm ci
 
@@ -59,28 +77,14 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p ../dist
-          cp android/app/build/outputs/apk/release/app-release.apk "../dist/matjip-${GITHUB_SHA::7}.apk"
-          cp android/app/build/outputs/apk/release/app-release.apk ../dist/matjip-latest.apk
+          cp android/app/build/outputs/apk/release/app-release.apk "../dist/$APK_NAME"
           ls -lh ../dist
 
       - name: Check API URL is bundled
         run: |
-          unzip -p ../dist/matjip-latest.apk assets/index.android.bundle | grep -a -q "$EXPO_PUBLIC_API_URL" \
+          unzip -p "../dist/$APK_NAME" assets/index.android.bundle | grep -a -q "$EXPO_PUBLIC_API_URL" \
             && echo "API URL OK: $EXPO_PUBLIC_API_URL" \
             || (echo "::error::번들에 API 주소가 없습니다"; exit 1)
-
-      - name: Publish to test release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG=android-test
-          NOTES="테스트용 APK (커밋 ${GITHUB_SHA::7}, 서버 $EXPO_PUBLIC_API_URL). 폰에서 matjip-latest.apk를 받아 설치하세요."
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes "$NOTES" --prerelease
-          else
-            gh release create "$TAG" --title "Android 테스트 빌드" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
-          fi
-          gh release upload "$TAG" ../dist/matjip-latest.apk --clobber
 
       - uses: actions/upload-artifact@v4
         with:
@@ -115,6 +119,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           script: |
             adb install -r "$(ls apk/*.apk | head -1)"
+            adb shell dumpsys package com.ryuseongcheol.matjip | grep -E "versionCode|versionName" | head -2
             adb logcat -c
             adb shell pm grant com.ryuseongcheol.matjip android.permission.ACCESS_FINE_LOCATION || true
             adb shell monkey -p com.ryuseongcheol.matjip -c android.intent.category.LAUNCHER 1
@@ -133,3 +138,52 @@ jobs:
             logcat.txt
             screen.png
           retention-days: 7
+
+  # 점검을 통과한 빌드만 버전 Release로 게시
+  publish:
+    needs: [build, smoke-test]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+      BUILD: ${{ needs.build.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: matjip-android-apk
+          path: apk
+
+      - name: 버전 Release 게시
+        run: |
+          TAG="android-v$VERSION-$BUILD"
+          APK="apk/matjip-$VERSION-$BUILD.apk"
+          # 직전 버전 이후 앱에 영향 있는 커밋만 변경 내역으로
+          PREV=$(gh release list --limit 100 --json tagName --jq '[.[] | select(.tagName | startswith("android-v"))][0].tagName // ""')
+          if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then RANGE="$PREV..HEAD"; else RANGE="HEAD~20..HEAD"; fi
+          CHANGES=$(git log --no-merges --pretty='- %s (%h)' $RANGE -- mobile lib | head -40)
+          [ -z "$CHANGES" ] && CHANGES="- 앱 변경 없음 (빌드 설정만 변경)"
+          cat > notes.md <<NOTES
+          **근처맛집 $VERSION (빌드 $BUILD)** · 커밋 ${GITHUB_SHA::7}
+
+          폰에서 아래 APK를 받아 기존 앱 위에 설치하세요. 에뮬레이터 실행 점검을 통과한 빌드입니다.
+
+          ### 변경 내역${PREV:+ (since $PREV)}
+          $CHANGES
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release create "$TAG" "$APK" --title "근처맛집 $VERSION (빌드 $BUILD)" --notes-file notes.md --target "$GITHUB_SHA" --latest
+
+      - name: 고정 링크(matjip-latest.apk) 갱신
+        run: |
+          cp "apk/matjip-$VERSION-$BUILD.apk" matjip-latest.apk
+          NOTES="항상 최신 버전: 근처맛집 $VERSION (빌드 $BUILD). 버전별 기록은 android-v* Release를 보세요."
+          if gh release view android-test >/dev/null 2>&1; then
+            gh release edit android-test --title "근처맛집 최신 APK" --notes "$NOTES" --prerelease
+          else
+            gh release create android-test --title "근처맛집 최신 APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+          fi
+          gh release upload android-test matjip-latest.apk --clobber

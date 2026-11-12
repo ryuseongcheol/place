@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { regionAtLocation, searchRegions, type RegionHit } from "./api";
+import { APP_VERSION, BUILD_NUMBER, COMMIT, checkLatestRelease, type LatestRelease } from "./appVersion";
 import { MAX_REGIONS, useRegions } from "./regions";
 import { RADII } from "./SearchPanel";
 import type { Colors } from "./theme";
@@ -23,6 +24,16 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [latest, setLatest] = useState<LatestRelease | null | "checking" | "failed">(null);
+
+  const checkUpdate = async () => {
+    setLatest("checking");
+    setLatest((await checkLatestRelease()) ?? "failed");
+  };
+  useEffect(() => {
+    if (visible && latest === null) checkUpdate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const search = async () => {
     if (!q.trim()) return;
@@ -166,6 +177,35 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
           <Text style={[styles.desc, { color: c.muted, marginTop: 8 }]}>
             수집은 앱이 켜져 있는 동안 진행되고, 앱을 다시 켜면 이어서 해요. 지역당 최대 1,200곳의 카카오 별점·메뉴·후기와 네이버 리뷰 수·키워드 리뷰를 모아 숨은 분류값을 계산하고, 서버에 Claude 키가 있으면 AI가 한 번 더 분류해요.
           </Text>
+
+          <Text style={[styles.h2, { color: c.text, marginTop: 28 }]}>앱 정보</Text>
+          <View style={[styles.region, { backgroundColor: c.surface, borderColor: c.line, marginTop: 10 }]}>
+            <Text style={{ fontSize: 15, fontWeight: "700", color: c.text }}>
+              근처맛집 {APP_VERSION} <Text style={{ fontWeight: "400", color: c.muted }}>(빌드 {BUILD_NUMBER}{COMMIT ? ` · ${COMMIT}` : ""})</Text>
+            </Text>
+            {latest === "checking" && <Text style={{ color: c.muted, marginTop: 6, fontSize: 13 }}>새 버전 확인 중…</Text>}
+            {latest === "failed" && <Text style={{ color: c.muted, marginTop: 6, fontSize: 13 }}>새 버전을 확인하지 못했어요.</Text>}
+            {latest && typeof latest === "object" && (latest.newer ? (
+              <View style={{ marginTop: 8 }}>
+                <Text style={{ color: c.accent, fontWeight: "700" }}>새 버전 {latest.version} (빌드 {latest.build})이 있어요</Text>
+                <View style={styles.regionActions}>
+                  <Pressable onPress={() => Linking.openURL(latest.apkUrl)} hitSlop={6}>
+                    <Text style={{ color: c.accent, fontSize: 13, fontWeight: "700" }}>APK 받기</Text>
+                  </Pressable>
+                  <Pressable onPress={() => Linking.openURL(latest.pageUrl)} hitSlop={6}>
+                    <Text style={{ color: c.text, fontSize: 13, fontWeight: "600" }}>변경 내역</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <Text style={{ color: c.naver, marginTop: 6, fontSize: 13 }}>최신 버전이에요.</Text>
+            ))}
+            {latest !== "checking" && (
+              <Pressable onPress={checkUpdate} hitSlop={6} style={{ marginTop: 10 }}>
+                <Text style={{ color: c.muted, fontSize: 13, fontWeight: "600" }}>업데이트 다시 확인</Text>
+              </Pressable>
+            )}
+          </View>
 
           <Text style={[styles.h2, { color: c.text, marginTop: 28 }]}>내 주변 검색 반경</Text>
           <View style={[styles.seg, { borderColor: c.line }]}>

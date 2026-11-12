@@ -48,6 +48,15 @@ npx eas-cli@latest build --profile development --platform android
 npm start
 ```
 
+## 버전 관리
+
+- 버전: `app.config.ts`의 `APP_VERSION` (기능 추가 1.1.0 → 1.2.0, 수정 1.2.0 → 1.2.1)
+- 빌드 번호(versionCode): GitHub Actions 실행 번호로 자동 증가 (안드로이드는 이 숫자가 커야 업데이트 설치)
+- `main`에 앱 관련 변경을 push하면: 빌드 → 에뮬레이터 실행 점검 → 통과하면 Release `android-v<버전>-<빌드>` 게시
+  (직전 버전 이후 변경 내역 자동 작성, APK 이름 `matjip-<버전>-<빌드>.apk`)
+- 항상 최신 링크: https://github.com/ryuseongcheol/place/releases/download/android-test/matjip-latest.apk
+- 앱 설정 > 앱 정보에서 현재 버전과 새 버전 여부 확인 (새 버전이 있으면 ⚙️ 버튼에 빨간 점)
+
 ## 서버 주소
 
 - `EXPO_PUBLIC_API_URL`을 비워두면 개발 중에는 **Expo 개발 서버를 띄운 PC의 IP:3000**으로 요청합니다. 폰과 PC가 같은 와이파이면 실기기에서도 동작합니다.

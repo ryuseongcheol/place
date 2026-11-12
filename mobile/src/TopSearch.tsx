@@ -22,6 +22,8 @@ interface Props {
   activeThemeId: string | null;
   onPickTheme: (t: ThemePreset) => void;
   onOpenSettings: () => void;
+  /** 설정 버튼에 빨간 점 (새 버전 있음) */
+  settingsBadge?: boolean;
 }
 
 export function progressText(p: RegionProgress | undefined): string {
@@ -77,6 +79,7 @@ export default function TopSearch(p: Props) {
         </View>
         <Pressable style={[styles.round, { backgroundColor: c.surface }]} onPress={p.onOpenSettings} accessibilityRole="button" accessibilityLabel="설정">
           <Text style={{ fontSize: 20 }}>⚙️</Text>
+          {p.settingsBadge && <View style={styles.dot} accessibilityLabel="새 버전 있음" />}
         </Pressable>
       </View>
 
@@ -167,6 +170,7 @@ const styles = StyleSheet.create({
   chips: { gap: 6, paddingHorizontal: 12, paddingVertical: 10 },
   chip: { height: 34, borderRadius: 17, borderWidth: 1, paddingHorizontal: 12, justifyContent: "center", ...shadow, elevation: 3 },
   sourceChip: {},
+  dot: { position: "absolute", top: 8, right: 8, width: 10, height: 10, borderRadius: 5, backgroundColor: "#E5484D", borderWidth: 2, borderColor: "#fff" },
   menu: { marginHorizontal: 12, borderRadius: 14, overflow: "hidden", ...shadow },
   menuItem: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
 });
