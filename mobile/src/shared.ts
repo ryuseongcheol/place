@@ -4,3 +4,4 @@ export { THEME_PRESETS, getPreset, type ThemePreset } from "../../lib/themes";
 export { detailFromRaw } from "../../lib/detailFromRaw";
 export { haversine, nameSimilarity, normalizeName, toNumber } from "../../lib/util";
 export { SHOWS, applyShows, mergeShows, showKind, showLabel } from "../../lib/shows";
+export { categoryIcon } from "../../lib/categoryIcon";

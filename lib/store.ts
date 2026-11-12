@@ -7,16 +7,41 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
  */
 interface KVLike {
   get(key: string): Promise<string | null>;
-  put(key: string, value: string): Promise<void>;
+  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
 }
 
-const memory = new Map<string, string>();
+const memory = new Map<string, { v: string; exp: number | null }>();
 const memoryKV: KVLike = {
-  get: async (k) => memory.get(k) ?? null,
-  put: async (k, v) => {
-    memory.set(k, v);
+  get: async (k) => {
+    const hit = memory.get(k);
+    if (!hit) return null;
+    if (hit.exp && hit.exp < Date.now()) {
+      memory.delete(k);
+      return null;
+    }
+    return hit.v;
+  },
+  put: async (k, v, opts) => {
+    memory.set(k, { v, exp: opts?.expirationTtl ? Date.now() + opts.expirationTtl * 1000 : null });
   },
 };
+
+/** 결과 캐시 (KV). 실패해도 조용히 넘어간다 */
+export async function cacheGet<T>(key: string): Promise<T | null> {
+  try {
+    const v = await getStore().kv.get(key);
+    return v ? (JSON.parse(v) as T) : null;
+  } catch {
+    return null;
+  }
+}
+export async function cachePut(key: string, value: unknown, ttlSec: number) {
+  try {
+    await getStore().kv.put(key, JSON.stringify(value), { expirationTtl: Math.max(60, ttlSec) });
+  } catch {
+    // 무시
+  }
+}
 
 export function getStore(): { kv: KVLike; persistent: boolean } {
   try {

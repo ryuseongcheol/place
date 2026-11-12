@@ -90,6 +90,8 @@ export interface RecommendResponse {
     ai: SourceStatus;
   };
   warnings: string[];
+  /** 빠른 모드: AI 재정렬이 아직 안 됨 (앱이 /api/recommend/rerank 를 따로 부른다) */
+  aiPending?: boolean;
 }
 
 // ---------- 식당 상세 (/api/place/[id]) ----------

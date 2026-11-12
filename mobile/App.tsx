@@ -1,8 +1,10 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import { fetchRecommendations, fetchThemes, searchDb } from "./src/api";
+import { fetchRecommendations, fetchThemes, rerankRecommendations, searchDb } from "./src/api";
 import BottomSheet, { type BottomSheetRef, type SheetSnap } from "./src/BottomSheet";
 import { FavoritesProvider, colorHex, useFavorites, type FavGroup } from "./src/favorites";
 import { FavGroupsHeader, FavGroupsList } from "./src/FavoritesView";
@@ -29,11 +31,24 @@ type ListMode = { mode: "results" } | { mode: "favGroups" } | { mode: "favList";
 type SheetState = ListMode | { mode: "detail"; place: ScoredPlace; back: ListMode | null };
 
 interface Results {
+  id: number;
   places: ScoredPlace[];
   title: string;
   subtitle?: string;
   warnings: string[];
+  /** AI가 순서를 다듬는 중 */
+  aiPending?: boolean;
 }
+
+type SortMode = "recommend" | "rating" | "distance" | "reviews";
+const SORTS: Array<{ id: SortMode; label: string }> = [
+  { id: "recommend", label: "추천순" },
+  { id: "rating", label: "별점순" },
+  { id: "distance", label: "거리순" },
+  { id: "reviews", label: "리뷰많은순" },
+];
+const reviewVolume = (p: ScoredPlace) =>
+  (p.kakao?.reviewCount ?? 0) + (p.naver?.visitorReviewCount ?? 0) + ((p.kakao?.blogReviewCount ?? 0) + (p.naver?.blogReviewCount ?? 0)) * 0.5;
 
 export default function App() {
   return (
@@ -54,6 +69,8 @@ function MapScreen() {
   const { loc, locate } = useLocation();
   const fav = useFavorites();
   const rg = useRegions();
+  // 지도 마커 픽토그램 글꼴 (마커는 비트맵으로 그려지므로 미리 불러둔다)
+  const [iconsReady] = useFonts(MaterialCommunityIcons.font);
 
   // 검색 조건
   const [aiEnabled, setAiEnabled] = useState(true);
@@ -81,6 +98,8 @@ function MapScreen() {
   const [webTarget, setWebTarget] = useState<WebTarget | null>(null);
 
   const mapRef = useRef<PlacesMapRef>(null);
+  const searchSeq = useRef(0);
+  const [sortMode, setSortMode] = useState<SortMode>("recommend");
   const sheetRef = useRef<BottomSheetRef>(null);
 
   const loadServerInfo = useCallback(() => {
@@ -103,7 +122,45 @@ function MapScreen() {
   const me = loc.status === "locating" ? null : { lat: loc.lat, lng: loc.lng };
   const distanceOf = useCallback((p: ScoredPlace) => (me ? Math.round(haversine(me, p)) : null), [me?.lat, me?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const mapPlaces = layer === "favorites" ? fav.placesIn(favGroupId) : (results?.places ?? []);
+  // 정렬: 목록과 지도 번호가 같은 순서를 쓴다
+  const sortPlaces = useCallback(
+    (list: ScoredPlace[]) => {
+      if (sortMode === "recommend") return list;
+      const arr = [...list];
+      if (sortMode === "rating")
+        arr.sort((a, b) => {
+          // 평가 3명 미만은 뒤로 (5.0 한 명짜리가 맨 위에 오지 않게)
+          const ra = (a.kakao?.ratingCount ?? 0) >= 3 ? (a.kakao?.rating ?? -1) : -1 + (a.kakao?.rating ?? 0) / 10;
+          const rb = (b.kakao?.ratingCount ?? 0) >= 3 ? (b.kakao?.rating ?? -1) : -1 + (b.kakao?.rating ?? 0) / 10;
+          return rb - ra || (b.kakao?.ratingCount ?? 0) - (a.kakao?.ratingCount ?? 0);
+        });
+      else if (sortMode === "distance") arr.sort((a, b) => (distanceOf(a) ?? a.distance) - (distanceOf(b) ?? b.distance));
+      else if (sortMode === "reviews") arr.sort((a, b) => reviewVolume(b) - reviewVolume(a));
+      return arr;
+    },
+    [sortMode, distanceOf],
+  );
+  const resultPlaces = useMemo(() => sortPlaces(results?.places ?? []), [results, sortPlaces]);
+  const mapPlaces = layer === "favorites" ? sortPlaces(fav.placesIn(favGroupId)) : resultPlaces;
+
+  const sortBar = (
+    <View style={{ flexDirection: "row", gap: 6, paddingHorizontal: 16, paddingBottom: 10 }}>
+      {SORTS.map((o) => {
+        const on = sortMode === o.id;
+        return (
+          <Pressable
+            key={o.id}
+            onPress={() => setSortMode(o.id)}
+            style={{ paddingHorizontal: 11, height: 30, borderRadius: 15, justifyContent: "center", borderWidth: 1, borderColor: on ? c.text : c.line, backgroundColor: on ? c.text : c.surface }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+          >
+            <Text style={{ fontSize: 12, fontWeight: on ? "700" : "500", color: on ? c.bg : c.text }}>{o.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
   const selectedId = snap !== "closed" && sheet.mode === "detail" ? sheet.place.id : null;
   const favGroupColor = favGroupId ? fav.groups.find((g) => g.id === favGroupId)?.color : null;
 
@@ -121,6 +178,7 @@ function MapScreen() {
     if (!theme && !q) return;
     setLoading(true);
     setError(null);
+    const searchId = ++searchSeq.current;
     try {
       let next: Results;
       if (source.kind === "nearby") {
@@ -130,6 +188,7 @@ function MapScreen() {
         const db = await searchDb({ lat: loc.lat, lng: loc.lng, radius, themeId: theme?.id ?? null, q: q || null }).catch(() => null);
         if (db && db.analyzed >= 30 && db.places.length >= 8) {
           next = {
+            id: searchId,
             places: db.places,
             title: q || theme!.label,
             subtitle: `내 주변 ${radiusText} · 저장된 ${db.inArea.toLocaleString()}곳 중 (분석 ${db.analyzed.toLocaleString()}곳)`,
@@ -137,13 +196,21 @@ function MapScreen() {
           };
         } else {
           // 2) 아니면 실시간 (카카오 검색 + 리뷰 수집)
-          const res = await fetchRecommendations({ lat: loc.lat, lng: loc.lng, radius, presetId: theme?.id ?? null, text: q || null });
+          //    빠른 결과를 먼저 보여주고, AI 정렬은 뒤에서 이어서 반영
+          const res = await fetchRecommendations({ lat: loc.lat, lng: loc.lng, radius, presetId: theme?.id ?? null, text: q || null, fast: true });
           next = {
+            id: searchId,
             places: res.places,
             title: res.query.summary,
             subtitle: `내 주변 ${radiusText} · 실시간 · 검색어 ${res.query.keywords.join(", ")}`,
             warnings: res.warnings,
+            aiPending: res.aiPending,
           };
+          if (res.aiPending) {
+            rerankRecommendations(res.query, res.places)
+              .then((r) => setResults((prev) => (prev && prev.id === searchId ? { ...prev, places: r.places, aiPending: false } : prev)))
+              .catch(() => setResults((prev) => (prev && prev.id === searchId ? { ...prev, aiPending: false } : prev)));
+          }
         }
       } else {
         const region = source.region;
@@ -154,6 +221,7 @@ function MapScreen() {
         if (!places.length) warnings.push("아직 이 지역 맛집을 모으는 중이에요. 설정에서 진행 상황을 볼 수 있어요.");
         else if (pr && pr.phase !== "done") warnings.push(`수집 중이라 ${pr.detailed}/${pr.target}곳만 분석됐어요. 끝나면 더 정확해져요.`);
         next = {
+          id: searchId,
           places: ranked,
           title: `${region.name} · ${q || theme!.label}`,
           subtitle: `미리 수집한 ${places.length}곳 중 ${ranked.length}곳`,
@@ -167,7 +235,7 @@ function MapScreen() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "추천을 불러오지 못했어요.";
       setError(msg);
-      setResults({ places: [], title: "검색 실패", warnings: [msg] });
+      setResults({ id: searchId, places: [], title: "검색 실패", warnings: [msg] });
       showList({ mode: "results" });
     } finally {
       setLoading(false);
@@ -276,7 +344,7 @@ function MapScreen() {
     );
   } else if (sheet.mode === "favList") {
     const g = sheet.groupId ? fav.groups.find((x) => x.id === sheet.groupId) : null;
-    const places = fav.placesIn(sheet.groupId);
+    const places = sortPlaces(fav.placesIn(sheet.groupId));
     header = (
       <View style={{ flexDirection: "row", alignItems: "center", paddingLeft: 8 }}>
         <Pressable onPress={goBack} hitSlop={10} style={{ padding: 6 }} accessibilityLabel="리스트 목록으로">
@@ -285,6 +353,12 @@ function MapScreen() {
         <View style={{ flex: 1 }}>
           <ListHeader title={`${g?.name ?? "전체"} ${places.length}`} subtitle="저장한 식당" colors={c} onClose={() => setSnap("closed")} />
         </View>
+      </View>
+    );
+    header = (
+      <View>
+        {header}
+        {sortBar}
       </View>
     );
     body = (
@@ -299,10 +373,20 @@ function MapScreen() {
       />
     );
   } else {
-    header = <ListHeader title={results?.title ?? "추천 결과"} subtitle={results?.subtitle} colors={c} onClose={() => setSnap("closed")} />;
+    header = (
+      <View>
+        <ListHeader
+          title={results?.title ?? "추천 결과"}
+          subtitle={results?.aiPending ? `${results.subtitle ?? ""} · AI가 리뷰를 읽고 순서를 다듬는 중…` : results?.subtitle}
+          colors={c}
+          onClose={() => setSnap("closed")}
+        />
+        {sortBar}
+      </View>
+    );
     body = (
       <PlaceList
-        places={results?.places ?? []}
+        places={resultPlaces}
         colors={c}
         distanceOf={distanceOf}
         onPick={(p) => openDetail(p, { mode: "results" })}
@@ -325,6 +409,7 @@ function MapScreen() {
         selectedId={selectedId}
         markerColor={(p) => (layer === "favorites" ? (favGroupColor ?? fav.colorOf(p.id) ?? "red") : fav.colorOf(p.id))}
         starMarkers={layer === "favorites"}
+        iconsReady={iconsReady}
         onSelect={(p) => openDetail(p, null)}
         onTapMap={() => snap === "half" && setSnap("closed")}
         padding={{ top: topArea, bottom: snap === "half" ? Math.round(H * HALF_RATIO) : 0 }}

@@ -140,5 +140,15 @@ export function collectStrings(obj: unknown, fieldNames: string[], limit = 10, m
   return [...new Set(out)];
 }
 
+/** 짧은 해시 (캐시 키용, FNV-1a) */
+export function hashKey(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
 export const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";

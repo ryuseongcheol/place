@@ -1,6 +1,9 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { StyleSheet, Text, View } from "react-native";
+import { GROUP_COLORS } from "./favorites";
+import { categoryIcon } from "./shared";
 import type { Colors } from "./theme";
 import type { ScoredPlace } from "./types";
 
@@ -33,11 +36,13 @@ interface Props {
   padding: { top: number; bottom: number };
   /** 번호 대신 ★로 표시 (즐겨찾기 목록일 때) */
   starMarkers?: boolean;
+  /** 아이콘 글꼴을 불러왔는지 (불러온 뒤 마커를 다시 그린다) */
+  iconsReady?: boolean;
   colors: Colors;
 }
 
 const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
-  { me, places, selectedId, markerColor, onSelect, onTapMap, padding, starMarkers, colors },
+  { me, places, selectedId, markerColor, onSelect, onTapMap, padding, starMarkers, iconsReady, colors },
   ref,
 ) {
   const mapRef = useRef<import("@mj-studio/react-native-naver-map").NaverMapViewRef>(null);
@@ -107,20 +112,48 @@ const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
     >
       {places.map((p, i) => {
         const active = p.id === selectedId;
-        const color = markerColor(p);
+        const group = markerColor(p);
+        const ring = active ? "#D9480F" : group ? (GROUP_COLORS.find((g) => g.symbol === group)?.hex ?? "#E5484D") : "#FFFFFF";
+        const { glyph, color } = categoryIcon(p.category, p.name);
+        const size = active ? 44 : 34; // 원 지름
+        const W = size + 12;
+        const H = size + 16;
         return (
           <NaverMapMarkerOverlay
-            key={p.id}
+            key={`${p.id}-${active ? "a" : "n"}-${ring}-${i}-${iconsReady ? 1 : 0}`}
             latitude={p.lat}
             longitude={p.lng}
-            image={{ symbol: (color ?? (active ? "red" : "black")) as "red" }}
-            width={active ? 36 : 28}
-            height={active ? 46 : 36}
+            width={W}
+            height={H}
+            anchor={{ x: 0.5, y: 1 }}
             zIndex={active ? 100 : places.length - i}
-            caption={{ text: starMarkers ? `★ ${p.name}` : `${i + 1}. ${p.name}`, textSize: active ? 14 : 12, haloColor: "#ffffff" }}
+            caption={{ text: p.name, textSize: active ? 13 : 11, haloColor: "#ffffff", requestedWidth: 120 }}
             isHideCollidedCaptions
             onTap={() => onSelect(p)}
-          />
+          >
+            {/* 업종 아이콘 핀 (네이티브에서 비트맵으로 그려진다) */}
+            <View collapsable={false} style={{ width: W, height: H, alignItems: "center", paddingTop: 4 }}>
+              <View
+                style={{
+                  width: size,
+                  height: size,
+                  borderRadius: size / 2,
+                  backgroundColor: color,
+                  borderWidth: active ? 4 : 3,
+                  borderColor: ring,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {/* 평면 픽토그램 (흰색) */}
+                <MaterialCommunityIcons name={glyph as keyof typeof MaterialCommunityIcons.glyphMap} size={Math.round(size * 0.52)} color="#FFFFFF" />
+              </View>
+              <View style={[styles.tail, { borderTopColor: ring === "#FFFFFF" ? color : ring }]} />
+              <View style={[styles.badge, { backgroundColor: starMarkers ? (group ? ring : "#F5A400") : active ? "#D9480F" : "#1F1A14" }]}>
+                <Text style={styles.badgeText}>{starMarkers ? "★" : i + 1}</Text>
+              </View>
+            </View>
+          </NaverMapMarkerOverlay>
         );
       })}
     </NaverMapView>
@@ -130,5 +163,29 @@ const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
 export default PlacesMap;
 
 const styles = StyleSheet.create({
+  tail: {
+    width: 0,
+    height: 0,
+    marginTop: -2,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 9,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+  },
+  badge: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+  },
+  badgeText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" },
   placeholder: { alignItems: "center", justifyContent: "center", padding: 24 },
 });

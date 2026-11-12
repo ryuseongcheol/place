@@ -130,7 +130,7 @@ export async function rerank(
   const res = await getClient().messages.parse({
     model: MODEL,
     max_tokens: 12000,
-    output_config: { effort: "medium", format: zodOutputFormat(RerankSchema) },
+    output_config: { effort: "low", format: zodOutputFormat(RerankSchema) },
     system: RERANK_SYSTEM,
     messages: [
       {

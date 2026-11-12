@@ -9,7 +9,7 @@ const NAVER_MAP_CLIENT_ID = process.env.NAVER_MAP_CLIENT_ID || "3ukni6vwbn";
  * - APP_VERSION: 사람이 보는 버전. 기능 추가는 두 번째 자리(1.1.0 → 1.2.0), 수정은 세 번째 자리(1.2.0 → 1.2.1)
  * - versionCode(빌드 번호): GitHub Actions 실행 번호로 자동 증가. 안드로이드는 이 숫자가 커야 업데이트로 설치된다
  */
-export const APP_VERSION = "1.1.0";
+export const APP_VERSION = "1.2.0";
 const BUILD_NUMBER = Number(process.env.APP_BUILD_NUMBER) || 1;
 const COMMIT = process.env.APP_COMMIT ?? "local";
 

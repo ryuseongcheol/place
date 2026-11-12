@@ -52,12 +52,23 @@ export function fetchRecommendations(body: {
   radius: number;
   presetId: string | null;
   text: string | null;
+  /** AI 재정렬 없이 먼저 받기 (rerankRecommendations 로 이어서) */
+  fast?: boolean;
 }) {
   return request<RecommendResponse>("/api/recommend", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+/** 먼저 받은 추천 결과를 AI가 리뷰를 읽고 다시 정렬 */
+export function rerankRecommendations(query: RecommendResponse["query"], places: ScoredPlace[]) {
+  return request<{ places: ScoredPlace[] }>("/api/recommend/rerank", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, places }),
+  }, 60000);
 }
 
 export function fetchPlaceDetail(p: { id: string; name: string; lat: number; lng: number; naverId: string | null }) {

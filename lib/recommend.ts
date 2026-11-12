@@ -17,7 +17,7 @@ export function isMockMode() {
   return process.env.MOCK_MODE === "1" || !process.env.KAKAO_REST_API_KEY;
 }
 
-export async function recommend(req: RecommendRequest): Promise<RecommendResponse> {
+export async function recommend(req: RecommendRequest, opts: { skipAi?: boolean } = {}): Promise<RecommendResponse> {
   const loc = { lat: req.lat, lng: req.lng };
   const radius = Math.min(5000, Math.max(200, req.radius ?? 1000));
   const preset = getPreset(req.presetId);
@@ -156,30 +156,11 @@ export async function recommend(req: RecommendRequest): Promise<RecommendRespons
   }));
   scored.sort((a, b) => b.score - a.score);
 
-  // 5) AI 재정렬 + 추천 이유 (상위 15곳 대상)
-  if (aiEnabled()) {
+  // 5) AI 재정렬 + 추천 이유. 빠른 모드면 건너뛰고, 앱이 /api/recommend/rerank 로 따로 요청한다
+  const aiPending = aiEnabled() && Boolean(opts.skipAi);
+  if (aiEnabled() && !opts.skipAi) {
     try {
-      const top = scored.slice(0, RESULT_COUNT + 6);
-      const picks = await rerank(query, top, RESULT_COUNT);
-      if (picks.size > 0) {
-        const picked = top
-          .filter((p) => picks.has(p.id))
-          .map((p) => {
-            const pk = picks.get(p.id)!;
-            return {
-              ...p,
-              // 최종 점수 = AI 적합도 60% + 데이터 점수 40%
-              score: Math.round(pk.fit * 0.6 + p.score * 0.4),
-              reason: pk.reason,
-              highlights: pk.highlights.length ? pk.highlights : p.highlights,
-              aiRanked: true,
-              _order: pk.order,
-            };
-          })
-          .sort((a, b) => a._order - b._order)
-          .map(({ _order, ...rest }) => rest);
-        scored = picked;
-      }
+      scored = await applyRerank(query, scored.slice(0, RESULT_COUNT + 6));
     } catch (e) {
       console.error("[ai] rerank", e);
       sources.ai = "partial";
@@ -190,7 +171,30 @@ export async function recommend(req: RecommendRequest): Promise<RecommendRespons
   if (!mock && totalFound < 10 && radius < 5000) {
     warnings.push(`반경 안에서 ${totalFound}곳만 찾았어요. 반경을 넓히면 더 많이 볼 수 있어요.`);
   }
-  return { query, region, places: scored.slice(0, RESULT_COUNT), sources, warnings };
+  // 빠른 모드: AI가 고를 후보까지 조금 더 넉넉히 돌려준다
+  return { query, region, places: scored.slice(0, aiPending ? RESULT_COUNT + 6 : RESULT_COUNT), sources, warnings, aiPending };
+}
+
+/** AI가 리뷰를 읽고 순서·추천 이유를 다시 정한다 (실패하면 예외) */
+export async function applyRerank(query: ThemeQuery, top: ScoredPlace[]): Promise<ScoredPlace[]> {
+  const picks = await rerank(query, top, RESULT_COUNT);
+  if (picks.size === 0) return top.slice(0, RESULT_COUNT);
+  return top
+    .filter((p) => picks.has(p.id))
+    .map((p) => {
+      const pk = picks.get(p.id)!;
+      return {
+        ...p,
+        // 최종 점수 = AI 적합도 60% + 데이터 점수 40%
+        score: Math.round(pk.fit * 0.6 + p.score * 0.4),
+        reason: pk.reason,
+        highlights: pk.highlights.length ? pk.highlights : p.highlights,
+        aiRanked: true,
+        _order: pk.order,
+      };
+    })
+    .sort((a, b) => a._order - b._order)
+    .map(({ _order, ...rest }) => rest);
 }
 
 /** 여러 검색어 결과를 합치고, 같은 가게는 matchedKeywords를 합친다 */
