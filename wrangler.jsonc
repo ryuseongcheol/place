@@ -1,0 +1,20 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	// Cloudflare 대시보드의 Worker 이름과 같아야 한다
+	"name": "place",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2026-11-01",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	"services": [
+		{
+			// 자기 자신을 가리키는 바인딩. service 값도 위 name 과 같아야 한다
+			"binding": "WORKER_SELF_REFERENCE",
+			"service": "place"
+		}
+	],
+	"observability": { "enabled": true }
+}
