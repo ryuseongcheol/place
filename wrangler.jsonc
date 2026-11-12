@@ -16,5 +16,12 @@
 			"service": "place"
 		}
 	],
+	"kv_namespaces": [
+		{
+			// 앱에서 고른 지역 목록 등 작은 데이터 (lib/store.ts). 매일 밤 서버 수집이 읽는다
+			"binding": "DATA",
+			"id": "f467d849f19d4e569de5d0fba93df0cc"
+		}
+	],
 	"observability": { "enabled": true }
 }
