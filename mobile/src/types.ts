@@ -48,13 +48,21 @@ export interface ScoredPlace extends BasePlace {
   reason: string;
   highlights: string[];
   aiRanked: boolean;
+  /** 숨은 분류값 (화면에는 직접 보여주지 않음) */
+  attrs?: Partial<Record<string, number>>;
+  /** 주제 적합도 0~100 */
+  fit?: number;
 }
 
 export interface ThemeQuery {
-  keywords: string[]; // 카카오 검색에 쓸 검색어 (1~4개)
+  /** 고른 주제 id (자유 입력만 했으면 null) */
+  themeId: string | null;
+  keywords: string[]; // 카카오 검색에 쓸 검색어 (1~6개)
   includeCafe: boolean;
   avoid: string[]; // 제외할 업종/키워드
   boost: string[]; // 리뷰·카테고리에 있으면 가산점
+  /** 숨은 분류값 가중치 (lib/classify.ts의 AttrKey). 주제 적합도 계산에 사용 */
+  attrWeights: Partial<Record<string, number>>;
   summary: string; // 사용자가 원하는 것을 한 문장으로
   weights: { rating: number; popularity: number; relevance: number; distance: number };
 }
@@ -127,4 +135,71 @@ export interface PlaceDetail {
     naverBlogReviews: string;
   };
   sources: { kakaoDetail: SourceStatus; naverBlog: SourceStatus; naverImage: SourceStatus };
+}
+
+// ---------- 지역 미리 수집 (/api/regions, /api/crawl) ----------
+
+export interface Region {
+  /** 행정동 코드 등 고유값 */
+  id: string;
+  /** 짧은 이름 (예: 역삼1동) */
+  name: string;
+  /** 전체 이름 (예: 서울 강남구 역삼1동) */
+  fullName: string;
+  lat: number;
+  lng: number;
+  /** 수집 반경 (m) */
+  radius: number;
+}
+
+export interface CrawlRect {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+  code: "FD6" | "CE7";
+  depth: number;
+  /** 다음에 받을 페이지 (1~3) */
+  page: number;
+}
+
+export interface CrawlCursor {
+  queue: CrawlRect[];
+}
+
+export interface CrawlListResponse {
+  places: BasePlace[];
+  cursor: CrawlCursor | null; // null이면 목록 수집 끝
+  calls: number;
+}
+
+/** 앱에 저장되는 수집된 식당 (화면 표시 + 숨은 분류값) */
+export interface CrawledPlace extends BasePlace {
+  rating: number | null;
+  ratingCount: number;
+  reviewCount: number;
+  blogReviewCount: number;
+  menus: MenuItem[];
+  tags: string[];
+  snippets: string[];
+  openHours: string[];
+  attrs: Partial<Record<string, number>>;
+  priceLevel: number | null;
+  detailAt: number | null;
+  detailFailed?: boolean;
+}
+
+export interface CrawlDetailItem {
+  id: string;
+  ok: boolean;
+  rating: number | null;
+  ratingCount: number;
+  reviewCount: number;
+  blogReviewCount: number;
+  menus: MenuItem[];
+  tags: string[];
+  snippets: string[];
+  openHours: string[];
+  attrs: Partial<Record<string, number>>;
+  priceLevel: number | null;
 }

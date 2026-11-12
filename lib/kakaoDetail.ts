@@ -1,5 +1,5 @@
-import type { BlogReview, MenuItem, ReviewItem } from "./types";
-import { deepFind, toNumber } from "./util";
+import type { BlogReview, KakaoReviewInfo, MenuItem, ReviewItem } from "./types";
+import { collectStrings, deepFind, toNumber } from "./util";
 
 /**
  * 카카오맵 장소 상세 원본(비공식)에서 사진·메뉴·후기·블로그 리뷰·영업시간을 뽑는다.
@@ -169,4 +169,44 @@ export function formatDate(v: unknown): string | null {
   }
   const m = s.match(/(\d{4})[.\-/]?(\d{2})[.\-/]?(\d{2})/);
   return m ? `${m[1]}.${m[2]}.${m[3]}` : s.slice(0, 20);
+}
+
+/** 카카오 상세 원본 → 별점·리뷰 수·후기 요약 (추천 점수용) */
+export function parseKakaoDetail(json: unknown): KakaoReviewInfo | null {
+  // 신규 형태: { kakaomap_review: { score_set: { average_score, review_count } }, blog_review: { review_count } ... }
+  // 구 형태:   { basicInfo: { feedback: { scoresum, scorecnt, comntcnt, blogrvwcnt } }, comment: { list: [{ contents }] } }
+  let rating: number | null = null;
+  let ratingCount = 0;
+
+  const avg = toNumber(deepFind(json, ["average_score", "averageScore", "avg_score"]));
+  if (avg !== null) rating = avg;
+
+  const scoresum = toNumber(deepFind(json, ["scoresum"]));
+  const scorecnt = toNumber(deepFind(json, ["scorecnt"]));
+  if (rating === null && scoresum !== null && scorecnt) rating = scoresum / scorecnt;
+  if (scorecnt) ratingCount = scorecnt;
+
+  const reviewCount = toNumber(deepFind(json, ["review_count", "comntcnt", "reviewCount", "kakaomap_review_count"])) ?? 0;
+  if (!ratingCount) ratingCount = reviewCount;
+
+  const blogCount =
+    toNumber(deepFind((json as Record<string, unknown>)?.["blog_review"] ?? json, ["blogrvwcnt", "review_count", "total_count"])) ?? 0;
+
+  const snippets = collectStrings(json, ["contents", "content", "review_text"], 8)
+    .filter((s) => s.length >= 8)
+    .map((s) => s.replace(/\s+/g, " ").slice(0, 160));
+
+  const tags = collectStrings(json, ["strength_name", "keyword_name", "name"], 30)
+    .filter((s) => s.length <= 20)
+    .slice(0, 8);
+
+  if (rating === null && !reviewCount && snippets.length === 0) return null;
+  return {
+    rating: rating !== null ? Math.round(Math.min(5, Math.max(0, rating)) * 10) / 10 : null,
+    ratingCount,
+    reviewCount,
+    blogReviewCount: blogCount === reviewCount ? 0 : blogCount,
+    snippets,
+    tags,
+  };
 }

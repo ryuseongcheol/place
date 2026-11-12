@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import type { PlaceDetail, RecommendResponse } from "./types";
+import type { BasePlace, CrawlCursor, CrawlDetailItem, CrawlListResponse, PlaceDetail, RecommendResponse, Region } from "./types";
 
 export interface PresetChip {
   id: string;
@@ -64,4 +64,30 @@ export function fetchPlaceDetail(p: { id: string; name: string; lat: number; lng
   const qs = new URLSearchParams({ name: p.name, lat: String(p.lat), lng: String(p.lng) });
   if (p.naverId) qs.set("naverId", p.naverId);
   return request<PlaceDetail>(`/api/place/${encodeURIComponent(p.id)}?${qs}`, undefined, 30000);
+}
+
+export type RegionHit = Omit<Region, "radius">;
+
+export function searchRegions(q: string) {
+  return request<{ regions: RegionHit[] }>(`/api/regions?q=${encodeURIComponent(q)}`, undefined, 15000);
+}
+
+export function regionAtLocation(lat: number, lng: number) {
+  return request<{ regions: RegionHit[] }>(`/api/regions?lat=${lat}&lng=${lng}`, undefined, 15000);
+}
+
+export function crawlList(region: Region, cursor: CrawlCursor | null) {
+  return request<CrawlListResponse>("/api/crawl/list", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ region, cursor }),
+  }, 60000);
+}
+
+export function crawlDetail(places: Array<Pick<BasePlace, "id" | "name" | "category">>) {
+  return request<{ items: CrawlDetailItem[] }>("/api/crawl/detail", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ places }),
+  }, 60000);
 }

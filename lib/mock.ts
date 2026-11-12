@@ -63,13 +63,13 @@ export function mockPlaces(loc: LatLng, keywords: string[]): BasePlace[] {
 }
 
 export function mockKakao(id: string): KakaoReviewInfo | null {
-  const s = SAMPLES[Number(id.replace("mock-", ""))];
+  const s = SAMPLES[Number(id.replace("mock-", "")) % SAMPLES.length];
   if (!s) return null;
   return { rating: s.rating, ratingCount: s.n, reviewCount: s.n, blogReviewCount: Math.round(s.n * 1.5), snippets: s.snippets, tags: s.tags };
 }
 
 export function mockNaver(id: string, name: string): NaverReviewInfo | null {
-  const s = SAMPLES[Number(id.replace("mock-", ""))];
+  const s = SAMPLES[Number(id.replace("mock-", "")) % SAMPLES.length];
   if (!s) return null;
   return {
     naverId: null,
@@ -88,7 +88,7 @@ const MOCK_MENUS: Record<string, Array<[string, number]>> = {
 };
 
 export function mockDetail(id: string, name: string): PlaceDetail {
-  const s = SAMPLES[Number(id.replace("mock-", ""))];
+  const s = SAMPLES[Number(id.replace("mock-", "")) % SAMPLES.length];
   const key = s ? Object.keys(MOCK_MENUS).find((k) => s.category.includes(k)) : undefined;
   const menus = (MOCK_MENUS[key ?? "default"] ?? MOCK_MENUS.default).map(([n, p]) => ({ name: n, price: `${p.toLocaleString("ko-KR")}원`, image: null }));
   const q = encodeURIComponent(name);
@@ -119,4 +119,41 @@ export function mockDetail(id: string, name: string): PlaceDetail {
     },
     sources: { kakaoDetail: "mock", naverBlog: "mock", naverImage: "mock" },
   };
+}
+
+/** 지역 수집 예시: 지역 중심 주변에 예시 식당을 3배로 흩뿌린다 (지점명만 다르게) */
+export function mockRegionPlaces(region: { lat: number; lng: number; radius: number }): BasePlace[] {
+  const out: BasePlace[] = [];
+  const n = SAMPLES.length;
+  for (let k = 0; k < 3; k++) {
+    SAMPLES.forEach((s, i) => {
+      const idx = i + k * n;
+      const angle = (idx / (n * 3)) * Math.PI * 2 + k;
+      const r = ((idx * 173) % 1000) / 1000 * region.radius * 0.95;
+      const lat = region.lat + (r * Math.sin(angle)) / 111000;
+      const lng = region.lng + (r * Math.cos(angle)) / (111000 * Math.cos((region.lat * Math.PI) / 180));
+      out.push({
+        id: `mock-${idx}`,
+        name: k === 0 ? s.name : `${s.name} ${k + 1}호점`,
+        category: s.category,
+        address: "(예시 주소)",
+        roadAddress: "(예시 도로명 주소)",
+        phone: "",
+        lat,
+        lng,
+        distance: Math.round(haversine(region, { lat, lng })),
+        kakaoUrl: `https://map.kakao.com/?q=${encodeURIComponent(s.name)}`,
+        searchRank: idx,
+        matchedKeywords: [],
+      });
+    });
+  }
+  return out;
+}
+
+export function mockCrawlDetail(p: { id: string; name: string; category: string }) {
+  const s = SAMPLES[Number(p.id.replace("mock-", "")) % SAMPLES.length];
+  const key = s ? Object.keys(MOCK_MENUS).find((k) => s.category.includes(k)) : undefined;
+  const menus = (MOCK_MENUS[key ?? "default"] ?? MOCK_MENUS.default).map(([n, pr]) => ({ name: n, price: `${pr.toLocaleString("ko-KR")}원`, image: null }));
+  return { s, menus };
 }

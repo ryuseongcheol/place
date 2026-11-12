@@ -322,6 +322,7 @@ export function naverPlaceLinks(naverId: string | null, name: string, region: st
     return { place: `${base}/home`, visitor: `${base}/review/visitor`, blog: `${base}/review/ugc` };
   }
   const q = encodeURIComponent(`${region?.split(" ").pop() ?? ""} ${name}`.trim());
-  const search = `https://m.search.naver.com/search.naver?query=${q}`;
-  return { place: `https://m.map.naver.com/search2/search.naver?query=${q}`, visitor: search, blog: `https://m.search.naver.com/search.naver?where=m_blog&query=${q}` };
+  // 장소 id를 모르면 네이버 지도 검색 (통합검색은 블로그 결과가 먼저 나와서 리뷰 링크로 쓰지 않는다)
+  const mapSearch = `https://m.map.naver.com/search2/search.naver?query=${q}`;
+  return { place: mapSearch, visitor: mapSearch, blog: `https://m.search.naver.com/search.naver?where=m_blog&query=${q}` };
 }

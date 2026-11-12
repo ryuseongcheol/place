@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
+import { ATTR_KEYS, ATTR_LABELS, type AttrKey } from "./classify";
 import type { ScoredPlace, ThemeQuery } from "./types";
 import type { ThemePreset } from "./themes";
 import { DEFAULT_WEIGHTS } from "./themes";
@@ -24,6 +25,9 @@ const ThemeSchema = z.object({
   avoid: z.array(z.string()).describe("업종명·카테고리에 있으면 제외할 단어"),
   boost: z.array(z.string()).describe("리뷰·카테고리에 있으면 주제에 잘 맞는다는 신호가 되는 단어 3~8개"),
   summary: z.string().describe("사용자가 원하는 식당을 한국어 한 문장으로 요약"),
+  attrs: z
+    .array(z.object({ key: z.enum(ATTR_KEYS), weight: z.number() }))
+    .describe("식당 성질 키와 가중치(-1~1). 원하는 성질은 양수, 피하고 싶은 성질은 음수. 2~6개"),
   weights: z
     .object({
       rating: z.number(),
@@ -37,7 +41,9 @@ const ThemeSchema = z.object({
 const THEME_SYSTEM = `너는 한국 맛집 검색 도우미다. 사용자의 상황/주제 설명을 카카오맵 키워드 검색 조건으로 바꾼다.
 - keywords는 음식 종류나 업종처럼 지도 검색에서 실제로 결과가 잘 나오는 짧은 단어로 쓴다. 문장, 지명, '맛집'만 단독으로 쓰지 않는다.
 - 주제가 모호하면 그 상황에 어울리는 서로 다른 음식 종류로 다양하게 고른다.
-- 위치는 별도로 처리하므로 지역명은 넣지 않는다.`;
+- 위치는 별도로 처리하므로 지역명은 넣지 않는다.
+- attrs는 아래 식당 성질 중에서 고른다:
+${ATTR_KEYS.map((k) => `  ${k}: ${ATTR_LABELS[k]}`).join("\n")}`;
 
 export async function parseTheme(preset: ThemePreset | undefined, text: string): Promise<ThemeQuery> {
   const userMsg = [
@@ -58,9 +64,13 @@ export async function parseTheme(preset: ThemePreset | undefined, text: string):
   const out = res.parsed_output;
   const w = out.weights;
   const sum = w.rating + w.popularity + w.relevance + w.distance;
+  const attrWeights: Partial<Record<AttrKey, number>> = { ...(preset?.attrs ?? {}) };
+  for (const a of out.attrs) attrWeights[a.key] = Math.max(-1, Math.min(1, a.weight));
   return {
+    themeId: preset?.id ?? null,
+    attrWeights,
     keywords: out.keywords.map((k) => k.trim()).filter(Boolean).slice(0, 6),
-    includeCafe: out.includeCafe || Boolean(preset?.query.includeCafe),
+    includeCafe: out.includeCafe || Boolean(preset?.includeCafe),
     avoid: out.avoid.slice(0, 8),
     boost: out.boost.slice(0, 10),
     summary: out.summary,
@@ -109,6 +119,11 @@ export async function rerank(
     naver_visitor_reviews: p.naver?.visitorReviewCount ?? null,
     naver_blog_reviews: p.naver?.blogReviewCount ?? null,
     naver_keywords: p.naver?.keywords ?? [],
+    signals: Object.entries(p.attrs ?? {})
+      .filter(([, v]) => (v ?? 0) >= 0.4)
+      .map(([k]) => ATTR_LABELS[k as AttrKey])
+      .slice(0, 6),
+    theme_fit: p.fit ?? null,
     heuristic_score: p.score,
   }));
 

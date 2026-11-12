@@ -32,9 +32,11 @@ interface Props {
   emptyText: string;
   numbered: boolean;
   notices?: string[];
+  /** 번호 대신 ★ 배지일 때 색 (저장 리스트 색) */
+  badgeColor?: (p: ScoredPlace) => string;
 }
 
-export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, numbered, notices }: Props) {
+export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, numbered, notices, badgeColor }: Props) {
   return (
     <View>
       {notices?.map((n) => (
@@ -48,7 +50,7 @@ export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, nu
         const category = p.category.split(">").slice(-1)[0]?.trim();
         return (
           <Pressable key={p.id} onPress={() => onPick(p)} style={[styles.row, { borderBottomColor: c.line }]} accessibilityRole="button">
-            <View style={[styles.badge, { backgroundColor: numbered ? c.text : "#F5A400" }]}>
+            <View style={[styles.badge, { backgroundColor: numbered ? c.text : (badgeColor?.(p) ?? "#F5A400") }]}>
               <Text style={{ color: numbered ? c.bg : "#fff", fontWeight: "800", fontSize: 13 }}>{numbered ? i + 1 : "★"}</Text>
             </View>
             <View style={{ flex: 1 }}>

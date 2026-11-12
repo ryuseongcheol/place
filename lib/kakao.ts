@@ -1,4 +1,6 @@
 import type { Budget } from "./budget";
+import { parseKakaoDetail } from "./kakaoDetail";
+export { parseKakaoDetail };
 import type { BasePlace, KakaoReviewInfo, LatLng } from "./types";
 import { BROWSER_UA, TTLCache, collectStrings, deepFind, fetchWithTimeout, toNumber } from "./util";
 
@@ -154,41 +156,107 @@ export async function fetchKakaoReviews(placeId: string, budget?: Budget): Promi
   return raw ? parseKakaoDetail(raw) : null;
 }
 
-export function parseKakaoDetail(json: unknown): KakaoReviewInfo | null {
-  // 신규 형태: { kakaomap_review: { score_set: { average_score, review_count } }, blog_review: { review_count } ... }
-  // 구 형태:   { basicInfo: { feedback: { scoresum, scorecnt, comntcnt, blogrvwcnt } }, comment: { list: [{ contents }] } }
-  let rating: number | null = null;
-  let ratingCount = 0;
 
-  const avg = toNumber(deepFind(json, ["average_score", "averageScore", "avg_score"]));
-  if (avg !== null) rating = avg;
+// ---------- 지역 미리 수집용 ----------
 
-  const scoresum = toNumber(deepFind(json, ["scoresum"]));
-  const scorecnt = toNumber(deepFind(json, ["scorecnt"]));
-  if (rating === null && scoresum !== null && scorecnt) rating = scoresum / scorecnt;
-  if (scorecnt) ratingCount = scorecnt;
-
-  const reviewCount = toNumber(deepFind(json, ["review_count", "comntcnt", "reviewCount", "kakaomap_review_count"])) ?? 0;
-  if (!ratingCount) ratingCount = reviewCount;
-
-  const blogCount =
-    toNumber(deepFind((json as Record<string, unknown>)?.["blog_review"] ?? json, ["blogrvwcnt", "review_count", "total_count"])) ?? 0;
-
-  const snippets = collectStrings(json, ["contents", "content", "review_text"], 8)
-    .filter((s) => s.length >= 8)
-    .map((s) => s.replace(/\s+/g, " ").slice(0, 160));
-
-  const tags = collectStrings(json, ["strength_name", "keyword_name", "name"], 30)
-    .filter((s) => s.length <= 20)
-    .slice(0, 8);
-
-  if (rating === null && !reviewCount && snippets.length === 0) return null;
+/**
+ * [공식] 사각형 안의 음식점/카페 목록 (카테고리 검색).
+ * 한 번에 최대 45곳(15 x 3페이지)까지만 주므로, 넘으면 호출하는 쪽에서 사각형을 4등분한다.
+ */
+export async function categorySearchRect(
+  code: "FD6" | "CE7",
+  rect: { minLng: number; minLat: number; maxLng: number; maxLat: number },
+  page: number,
+  budget?: Budget,
+): Promise<{ places: BasePlace[]; total: number; isEnd: boolean } | null> {
+  if (budget && !budget.take()) return null;
+  const params = new URLSearchParams({
+    category_group_code: code,
+    rect: `${rect.minLng},${rect.minLat},${rect.maxLng},${rect.maxLat}`,
+    page: String(page),
+    size: "15",
+    sort: "accuracy",
+  });
+  const res = await fetchWithTimeout(`${KAKAO_LOCAL}/search/category.json?${params}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`카카오 카테고리 검색 실패 (${res.status}): ${await res.text().catch(() => "")}`);
+  const data = (await res.json()) as { documents: KakaoDoc[]; meta: { total_count: number; is_end: boolean } };
   return {
-    rating: rating !== null ? Math.round(Math.min(5, Math.max(0, rating)) * 10) / 10 : null,
-    ratingCount,
-    reviewCount,
-    blogReviewCount: blogCount === reviewCount ? 0 : blogCount,
-    snippets,
-    tags,
+    total: data.meta.total_count,
+    isEnd: data.meta.is_end,
+    places: data.documents.map((d, i) => ({
+      id: d.id,
+      name: d.place_name,
+      category: d.category_name,
+      address: d.address_name,
+      roadAddress: d.road_address_name,
+      phone: d.phone,
+      lat: Number(d.y),
+      lng: Number(d.x),
+      distance: 0,
+      kakaoUrl: d.place_url,
+      searchRank: (page - 1) * 15 + i,
+      matchedKeywords: [],
+    })),
+  };
+}
+
+export interface RegionHit {
+  id: string;
+  name: string;
+  fullName: string;
+  lat: number;
+  lng: number;
+}
+
+/** [공식] 동 이름으로 지역 찾기 (예: "역삼동", "성수") */
+export async function searchRegions(query: string): Promise<RegionHit[]> {
+  const params = new URLSearchParams({ query, analyze_type: "similar", size: "15" });
+  const res = await fetchWithTimeout(`${KAKAO_LOCAL}/search/address.json?${params}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`카카오 주소 검색 실패 (${res.status})`);
+  const data = (await res.json()) as {
+    documents: Array<{
+      address_name: string;
+      address_type: string;
+      x: string;
+      y: string;
+      address: { region_1depth_name: string; region_2depth_name: string; region_3depth_name: string; region_3depth_h_name: string; h_code: string; b_code: string } | null;
+    }>;
+  };
+  const out: RegionHit[] = [];
+  const seen = new Set<string>();
+  for (const d of data.documents) {
+    const a = d.address;
+    if (!a) continue;
+    const dong = a.region_3depth_h_name || a.region_3depth_name;
+    if (!dong) continue;
+    const id = a.h_code || a.b_code || `${d.x},${d.y}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      name: dong,
+      fullName: [a.region_1depth_name, a.region_2depth_name, dong].filter(Boolean).join(" "),
+      lat: Number(d.y),
+      lng: Number(d.x),
+    });
+  }
+  return out;
+}
+
+/** [공식] 좌표가 속한 행정동 */
+export async function regionAt(loc: LatLng): Promise<RegionHit | null> {
+  const res = await fetchWithTimeout(`${KAKAO_LOCAL}/geo/coord2regioncode.json?x=${loc.lng}&y=${loc.lat}`, { headers: authHeaders() });
+  if (!res.ok) return null;
+  const data = (await res.json()) as {
+    documents: Array<{ region_type: string; code: string; region_1depth_name: string; region_2depth_name: string; region_3depth_name: string; x: number; y: number }>;
+  };
+  const d = data.documents.find((x) => x.region_type === "H") ?? data.documents[0];
+  if (!d) return null;
+  return {
+    id: d.code,
+    name: d.region_3depth_name,
+    fullName: [d.region_1depth_name, d.region_2depth_name, d.region_3depth_name].filter(Boolean).join(" "),
+    lat: d.y || loc.lat,
+    lng: d.x || loc.lng,
   };
 }

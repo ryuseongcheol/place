@@ -1,3 +1,4 @@
+import { attrFit, topReasons, type Attrs } from "./classify";
 import type { BasePlace, KakaoReviewInfo, NaverReviewInfo, ScoredPlace, ThemeQuery } from "./types";
 
 /** 리뷰 수가 적은 높은 별점을 보정하기 위한 베이지안 평균 */
@@ -25,6 +26,7 @@ export function scorePlace(
   q: ThemeQuery,
   radius: number,
   totalCandidates: number,
+  attrs: Attrs = {},
 ): ScoredPlace {
   // 1) 평점: 카카오 별점(베이지안 보정). 네이버 별점이 있으면 평균. 정보가 없으면 중립 0.45
   const ratings: number[] = [];
@@ -45,7 +47,11 @@ export function scorePlace(
   const multiHit = Math.min(1, (p.matchedKeywords.length - 1) / 2);
   const boostHits = Math.min(1, textHits(text, q.boost) / 2);
   const avoidHits = textHits(`${p.name} ${p.category}`, q.avoid);
-  const relevance = clamp01(0.45 * rankScore + 0.25 * multiHit + 0.3 * boostHits - 0.5 * avoidHits);
+  const keywordRelevance = clamp01(0.45 * rankScore + 0.25 * multiHit + 0.3 * boostHits - 0.5 * avoidHits);
+  // 주제 적합도(숨은 분류값 기반)가 있으면 관련도의 60%를 차지
+  const hasTheme = Object.keys(q.attrWeights ?? {}).length > 0;
+  const fit = hasTheme ? attrFit(attrs, q.attrWeights as Attrs) : null;
+  const relevance = fit === null ? keywordRelevance : clamp01(0.6 * (fit / 100) + 0.4 * keywordRelevance - 0.5 * avoidHits);
 
   // 4) 거리
   const distance = clamp01(1 - p.distance / Math.max(radius, 1));
@@ -65,19 +71,23 @@ export function scorePlace(
       relevance: Math.round(relevance * 100),
       distance: Math.round(distance * 100),
     },
-    reason: heuristicReason(p, kakao, naver, q),
+    reason: heuristicReason(p, kakao, naver, q, attrs),
     highlights: (kakao?.tags ?? []).concat(naver?.keywords ?? []).slice(0, 4),
     aiRanked: false,
+    attrs,
+    fit: fit ?? undefined,
   };
 }
 
-function heuristicReason(p: BasePlace, kakao: KakaoReviewInfo | null, naver: NaverReviewInfo | null, q: ThemeQuery): string {
+function heuristicReason(p: BasePlace, kakao: KakaoReviewInfo | null, naver: NaverReviewInfo | null, q: ThemeQuery, attrs: Attrs): string {
+  const why = topReasons(attrs, q.attrWeights as Attrs);
   const parts: string[] = [];
   const cat = p.category.split(">").pop()?.trim();
   if (cat) parts.push(cat);
   if (kakao?.rating) parts.push(`카카오 ★${kakao.rating.toFixed(1)} (${kakao.ratingCount}명)`);
   if (naver?.visitorReviewCount) parts.push(`네이버 방문자 리뷰 ${naver.visitorReviewCount.toLocaleString()}개`);
   parts.push(`${p.distance}m`);
+  if (why.length) return `${why.join(", ")}(으)로 분류된 곳이에요. ${parts.join(" · ")}`;
   const kw = p.matchedKeywords.slice(0, 2).join(", ");
   return `'${kw}' 검색에 잡힌 ${parts.join(" · ")}. ${q.summary}에 맞을 가능성이 높아요.`;
 }

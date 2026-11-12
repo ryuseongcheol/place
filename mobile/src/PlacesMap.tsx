@@ -25,7 +25,8 @@ interface Props {
   me: { lat: number; lng: number } | null;
   places: ScoredPlace[];
   selectedId: string | null;
-  favoriteIds: Set<string>;
+  /** 즐겨찾기 리스트 색 (없으면 기본 검정) */
+  markerColor: (p: ScoredPlace) => string | null;
   onSelect: (place: ScoredPlace) => void;
   onTapMap?: () => void;
   /** 아래 시트/위 버튼에 가려지는 영역 (지도 중심 계산용) */
@@ -36,7 +37,7 @@ interface Props {
 }
 
 const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
-  { me, places, selectedId, favoriteIds, onSelect, onTapMap, padding, starMarkers, colors },
+  { me, places, selectedId, markerColor, onSelect, onTapMap, padding, starMarkers, colors },
   ref,
 ) {
   const mapRef = useRef<import("@mj-studio/react-native-naver-map").NaverMapViewRef>(null);
@@ -106,13 +107,13 @@ const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
     >
       {places.map((p, i) => {
         const active = p.id === selectedId;
-        const fav = favoriteIds.has(p.id);
+        const color = markerColor(p);
         return (
           <NaverMapMarkerOverlay
             key={p.id}
             latitude={p.lat}
             longitude={p.lng}
-            image={{ symbol: active ? "red" : fav ? "yellow" : "black" }}
+            image={{ symbol: (color ?? (active ? "red" : "black")) as "red" }}
             width={active ? 36 : 28}
             height={active ? 46 : 36}
             zIndex={active ? 100 : places.length - i}

@@ -1,6 +1,8 @@
 import { aiEnabled, parseTheme, rerank } from "./ai";
 import { planFor, requestBudget } from "./budget";
-import { fetchKakaoReviews, regionName, searchKakao } from "./kakao";
+import { classify, type Attrs } from "./classify";
+import { fetchKakaoRaw, parseKakaoDetail, regionName, searchKakao } from "./kakao";
+import { extractKakaoReviews, extractMenus, extractOpenHours } from "./kakaoDetail";
 import { mockKakao, mockNaver, mockPlaces } from "./mock";
 import { attachNaver } from "./naver";
 import { scorePlace } from "./score";
@@ -86,6 +88,12 @@ export async function recommend(req: RecommendRequest): Promise<RecommendRespons
 
   // 3) 리뷰·별점 수집 (카카오 상세 + 네이버 검색)
   const kakaoMap = new Map<string, KakaoReviewInfo | null>();
+  const rawMap = new Map<string, unknown>();
+  const fetchOne = async (id: string) => {
+    const raw = await fetchKakaoRaw(id, budget);
+    if (raw) rawMap.set(id, raw);
+    kakaoMap.set(id, raw ? parseKakaoDetail(raw) : null);
+  };
   let naverMap = new Map<string, NonNullable<ReturnType<typeof mockNaver>>>();
   if (mock) {
     for (const p of candidates) {
@@ -98,8 +106,8 @@ export async function recommend(req: RecommendRequest): Promise<RecommendRespons
       ? (async () => {
           // 첫 곳을 먼저 조회해 동작하는 엔드포인트를 알아낸 뒤 나머지를 병렬로 (실패하는 엔드포인트에 호출을 낭비하지 않게)
           const [first, ...rest] = candidates;
-          kakaoMap.set(first.id, await fetchKakaoReviews(first.id, budget));
-          await mapLimit(rest, 6, async (p) => kakaoMap.set(p.id, await fetchKakaoReviews(p.id, budget)));
+          await fetchOne(first.id);
+          await mapLimit(rest, 6, (p) => fetchOne(p.id));
         })()
       : Promise.resolve();
     const naverJob = attachNaver(candidates, query.keywords, loc, region, useUnofficial, {
@@ -119,8 +127,26 @@ export async function recommend(req: RecommendRequest): Promise<RecommendRespons
   }
 
   // 4) 점수 계산
+  // 숨은 분류값 계산 (카카오 상세 원본 + 네이버 키워드 리뷰)
+  const attrsOf = (p: BasePlace): Attrs => {
+    const raw = rawMap.get(p.id);
+    const kakao = kakaoMap.get(p.id) ?? null;
+    const naver = naverMap.get(p.id) ?? null;
+    return classify({
+      name: p.name,
+      category: p.category,
+      menus: raw ? extractMenus(raw) : [],
+      tags: [...(kakao?.tags ?? []), ...(naver?.keywords ?? [])],
+      snippets: raw ? extractKakaoReviews(raw).map((r) => r.text) : (kakao?.snippets ?? []),
+      openHours: raw ? extractOpenHours(raw) : [],
+      rating: kakao?.rating ?? null,
+      ratingCount: kakao?.ratingCount ?? 0,
+      reviewCount: (kakao?.reviewCount ?? 0) + (naver?.visitorReviewCount ?? 0),
+      blogReviewCount: (kakao?.blogReviewCount ?? 0) + (naver?.blogReviewCount ?? 0),
+    }).attrs;
+  };
   let scored: ScoredPlace[] = candidates.map((p) =>
-    scorePlace(p, kakaoMap.get(p.id) ?? null, naverMap.get(p.id) ?? null, query, radius, candidates.length),
+    scorePlace(p, kakaoMap.get(p.id) ?? null, naverMap.get(p.id) ?? null, query, radius, candidates.length, attrsOf(p)),
   );
   scored.sort((a, b) => b.score - a.score);
 

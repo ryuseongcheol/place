@@ -2,6 +2,7 @@ import { Image } from "expo-image";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { fetchPlaceDetail } from "./api";
+import { naverMapSearchUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
 import { callPhone, openKakaoMap, openNaverMap } from "./openMap";
 import type { Colors } from "./theme";
 import type { PlaceDetail, ScoredPlace } from "./types";
@@ -64,12 +65,19 @@ interface BodyProps {
   place: ScoredPlace;
   colors: Colors;
   isFavorite: boolean;
-  onToggleFavorite: () => void;
+  /** 저장(리스트 고르기) 열기 */
+  onSave: () => void;
   openWeb: (t: WebTarget) => void;
 }
 
+/** 지번 주소에서 동 이름 (네이버 검색어 보조) */
+function dongOf(address: string) {
+  return address.split(/\s+/).find((t) => /(동|가|읍|면|리)$/.test(t) && !/^\d/.test(t)) ?? null;
+}
+
 /** 시트 본문: 액션 버튼, 사진, 추천 이유, 정보, 메뉴, 리뷰, 블로그 리뷰 */
-export function PlaceBody({ place: p, colors: c, isFavorite, onToggleFavorite, openWeb }: BodyProps) {
+export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: BodyProps) {
+  const [findingNaver, setFindingNaver] = useState(false);
   const [detail, setDetail] = useState<PlaceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,13 +101,26 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onToggleFavorite, o
   }, [p.id, p.name, p.lat, p.lng, p.naver?.naverId]);
 
   const links = detail?.links;
-  const naverVisitorUrl = links?.naverVisitorReviews ?? p.naver?.naverUrl ?? `https://m.search.naver.com/search.naver?query=${encodeURIComponent(p.name)}`;
+
+  // 네이버 방문자 리뷰: 장소 id를 알면 리뷰 탭으로 바로, 모르면 폰에서 찾아보고, 그래도 없으면
+  // 네이버 지도 검색을 열되 가게를 누르는 순간 리뷰 탭으로 보낸다 (블로그 검색 결과로 가지 않게)
+  const openNaverReviews = async () => {
+    const title = `${p.name} 방문자 리뷰`;
+    let naverId = p.naver?.naverId ?? null;
+    if (!naverId) {
+      setFindingNaver(true);
+      naverId = await resolveNaverPlaceId(p).catch(() => null);
+      setFindingNaver(false);
+    }
+    if (naverId) openWeb({ title, url: naverVisitorReviewUrl(naverId) });
+    else openWeb({ title, url: naverMapSearchUrl(p.name, dongOf(p.address)), naverToReviews: true });
+  };
 
   return (
     <View>
       {/* 액션 버튼 */}
       <View style={[styles.actions, { borderColor: c.line }]}>
-        <Action c={c} icon={isFavorite ? "★" : "☆"} label="저장" active={isFavorite} onPress={onToggleFavorite} />
+        <Action c={c} icon={isFavorite ? "★" : "☆"} label={isFavorite ? "저장됨" : "저장"} active={isFavorite} onPress={onSave} />
         <Action c={c} icon="➜" label="길찾기" onPress={() => openNaverMap(p)} />
         <Action c={c} icon="☎" label="전화" disabled={!p.phone} onPress={() => p.phone && callPhone(p.phone)} />
         <Action c={c} icon="K" label="카카오맵" onPress={() => openKakaoMap(p)} />
@@ -111,7 +132,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onToggleFavorite, o
       ) : detail?.photos.length ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photos}>
           {detail.photos.map((u, i) => (
-            <Pressable key={u} onPress={() => openWeb({ url: links?.kakaoPlace ?? u, title: `${p.name} 사진` })}>
+            <Pressable key={u} onPress={() => openWeb({ title: `${p.name} 사진`, photos: detail.photos, index: i })} accessibilityLabel={`사진 ${i + 1} 크게 보기`}>
               <Image source={{ uri: u }} style={[i === 0 ? styles.photoBig : styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" transition={150} />
             </Pressable>
           ))}
@@ -183,7 +204,8 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onToggleFavorite, o
           {/* 네이버 방문자 리뷰: 본문은 공식 API가 없어 웹뷰로 */}
           <Pressable
             style={[styles.sourceCard, { backgroundColor: c.naverBg }]}
-            onPress={() => openWeb({ url: naverVisitorUrl, title: `${p.name} 네이버 리뷰` })}
+            onPress={openNaverReviews}
+            disabled={findingNaver}
             accessibilityRole="link"
           >
             <View style={{ flex: 1 }}>
@@ -196,7 +218,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onToggleFavorite, o
                 </Text>
               )}
             </View>
-            <Text style={{ color: c.naver, fontSize: 13, fontWeight: "600" }}>보기 ›</Text>
+            {findingNaver ? <ActivityIndicator color={c.naver} /> : <Text style={{ color: c.naver, fontSize: 13, fontWeight: "600" }}>보기 ›</Text>}
           </Pressable>
 
           {/* 카카오맵 후기 */}

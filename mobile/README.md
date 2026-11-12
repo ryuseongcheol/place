@@ -55,6 +55,18 @@ npm start
 
 ## 화면 구성 (네이버 지도 방식)
 
+- 상단: 검색창(메뉴·분위기·상황) + ⚙️ 설정, 그 아래 **검색 범위**(📍 내 주변 / 🏘 미리 수집한 동네) 칩과 **주제** 칩
+- 하단: ★ 저장(리스트) · 🍽 맛집추천 · ◎ 내 위치
+- 주제는 단어가 아니라 상황·기분 (혼자여도 편안한, 설레는 데이트, 속 풀리는 한 그릇, 아는 사람만 아는 …). 주제 목록은 `../lib/themes.ts`
+
+### 지역 미리 수집 (설정)
+- 동네를 최대 5곳까지 고르면(6번째를 고르면 가장 먼저 고른 곳이 빠짐) 그 동네 맛집을 미리 모아 기기에 저장
+- 목록: 서버가 카카오 공식 카테고리 검색으로 지역 반경 800m 안 음식점·카페를 빠짐없이 찾음 (격자 분할)
+- 상세: 폰에서 카카오맵 상세를 직접 받아 숨은 분류값 26가지(혼밥·단체·데이트·조용함·가격대·국물·매운맛·늦게까지·숨은 맛집·핫플 …)를 계산 (`../lib/classify.ts`). 폰에서 막히면 서버로
+- 상단에서 그 동네를 고르면 서버 호출 없이 바로 주제별 순위
+
+### 이전 구성
+
 1. 전체 화면이 네이버 지도
 2. 앱을 켜면 "어떤 맛집을 찾으세요?" 추천 팝업이 지도 위에 뜸
 3. 지도 하단의 **맛집추천** 버튼으로 팝업을 다시 열 수 있음
@@ -80,8 +92,17 @@ src/SearchPanel.tsx      추천 조건 팝업
 src/BottomSheet.tsx      반/전체/닫힘 바텀시트 (RN Animated + PanResponder)
 src/PlaceList.tsx        추천 결과·즐겨찾기 목록
 src/PlaceDetailView.tsx  식당 상세 (사진, 메뉴, 리뷰, 블로그)
-src/WebViewModal.tsx     리뷰·블로그 웹뷰 브라우저
-src/favorites.tsx        즐겨찾기 (AsyncStorage)
+src/WebViewModal.tsx     리뷰·블로그 웹뷰 브라우저, 사진 전용 뷰어
+src/favorites.tsx        저장 리스트(그룹) (AsyncStorage)
+src/SaveSheet.tsx        저장할 리스트 고르기, 리스트 만들기/수정
+src/FavoritesView.tsx    저장 리스트 목록
+src/TopSearch.tsx        상단 검색창 + 범위/주제 칩
+src/SettingsScreen.tsx   설정: 지역 선택(최대 5곳), 수집 진행, 검색 반경
+src/regions.tsx          지역 저장 + 백그라운드 수집
+src/localRank.ts         수집 데이터로 주제/검색어 순위
+src/kakaoDevice.ts       폰에서 카카오맵 상세 받기
+src/naverDevice.ts       폰에서 네이버 장소 id 찾기 (방문자 리뷰 바로가기)
+src/shared.ts            서버와 공유하는 코드(../lib) 진입점 — metro.config.js에서 ../lib 포함
 src/api.ts               서버 API 호출
 src/useLocation.ts       위치 권한/현재 위치
 src/openMap.ts           카카오맵·네이버지도 앱으로 열기

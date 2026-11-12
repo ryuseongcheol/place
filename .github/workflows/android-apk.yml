@@ -9,7 +9,7 @@ on:
         default: "https://place.spikeryu.workers.dev"
   push:
     branches: [main]
-    paths: ["mobile/**", ".github/workflows/android-apk.yml"]
+    paths: ["mobile/**", "lib/classify.ts", "lib/themes.ts", "lib/detailFromRaw.ts", "lib/kakaoDetail.ts", "lib/util.ts", "lib/types.ts", ".github/workflows/android-apk.yml"]
 
 concurrency:
   group: android-apk-${{ github.ref }}

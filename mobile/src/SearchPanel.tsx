@@ -1,6 +1,6 @@
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { PresetChip } from "./api";
+type PresetChip = { id: string; label: string; emoji: string };
 import type { Colors } from "./theme";
 import type { LocState } from "./useLocation";
 
@@ -23,6 +23,8 @@ interface Props {
   serverError: string | null;
   onRetryServer: () => void;
   onSubmit: () => void;
+  /** 검색 범위 표시 (내 주변 / 미리 수집한 지역) */
+  sourceLabel?: string;
   /** 닫을 수 있는지 (앱 첫 실행처럼 아직 결과가 없어도 지도는 볼 수 있게 항상 허용) */
   onClose: () => void;
 }
@@ -51,7 +53,13 @@ export default function SearchPanel(p: Props) {
             <View style={styles.locRow}>
               <View style={[styles.dot, { backgroundColor: p.loc.status === "ok" ? c.naver : c.muted }]} />
               <Text style={[styles.locText, { color: c.muted }]} numberOfLines={1}>
-                {p.loc.status === "locating" ? "현재 위치 확인 중…" : p.loc.status === "ok" ? "현재 위치 기준" : "강남역 기준 (위치 권한 없음)"}
+                {p.sourceLabel && !p.sourceLabel.startsWith("내 주변")
+                  ? `검색 범위: ${p.sourceLabel}`
+                  : p.loc.status === "locating"
+                    ? "현재 위치 확인 중…"
+                    : p.loc.status === "ok"
+                      ? "현재 위치 기준"
+                      : "강남역 기준 (위치 권한 없음)"}
               </Text>
               <Pressable onPress={p.onRelocate} disabled={p.loc.status === "locating"} hitSlop={8}>
                 <Text style={{ fontSize: 13, color: c.accent, fontWeight: "600" }}>위치 다시 찾기</Text>

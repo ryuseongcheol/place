@@ -74,6 +74,9 @@ app/
   KakaoMap.tsx          카카오맵 SDK 지도
   api/recommend/route.ts  추천 API (POST)
   api/place/[id]/route.ts 식당 상세 API (GET: 사진·메뉴·후기·블로그 리뷰)
+  api/regions/route.ts    동 이름 검색 / 현재 위치의 동
+  api/crawl/list/route.ts 지역 식당 목록 수집 (커서로 이어받기)
+  api/crawl/detail/route.ts 식당 상세 + 숨은 분류값 (앱이 직접 못 받을 때)
   api/themes/route.ts     테마 목록 + 설정 상태
 lib/
   recommend.ts          전체 파이프라인
@@ -83,6 +86,8 @@ lib/
   naver.ts              네이버 검색(공식/비공식) + 장소 매칭
   score.ts              점수 계산
   ai.ts                 Claude: 주제 해석, 재정렬
-  themes.ts             테마 프리셋
+  themes.ts             주제 (상황·기분, 숨은 분류값 가중치) — 앱과 공유
+  classify.ts           숨은 분류값 26가지 계산 — 앱과 공유
+  crawl.ts              지역 격자 수집
   mock.ts               예시 데이터
 ```
