@@ -15,6 +15,9 @@ concurrency:
   group: android-apk-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write # 테스트용 Release에 APK를 올리기 위해
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -56,7 +59,27 @@ jobs:
         run: |
           mkdir -p ../dist
           cp android/app/build/outputs/apk/release/app-release.apk "../dist/matjip-${GITHUB_SHA::7}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk ../dist/matjip-latest.apk
           ls -lh ../dist
+
+      - name: Check API URL is bundled
+        run: |
+          unzip -p ../dist/matjip-latest.apk assets/index.android.bundle | grep -a -q "$EXPO_PUBLIC_API_URL" \
+            && echo "API URL OK: $EXPO_PUBLIC_API_URL" \
+            || (echo "::error::번들에 API 주소가 없습니다"; exit 1)
+
+      - name: Publish to test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=android-test
+          NOTES="테스트용 APK (커밋 ${GITHUB_SHA::7}, 서버 $EXPO_PUBLIC_API_URL). 폰에서 matjip-latest.apk를 받아 설치하세요."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes "$NOTES" --prerelease
+          else
+            gh release create "$TAG" --title "Android 테스트 빌드" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+          fi
+          gh release upload "$TAG" ../dist/matjip-latest.apk --clobber
 
       - uses: actions/upload-artifact@v4
         with:
