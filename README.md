@@ -42,7 +42,8 @@ http://localhost:3000 접속. 휴대폰에서 위치를 쓰려면 HTTPS가 필�
 |---|---|---|---|
 | `KAKAO_REST_API_KEY` | ✅ | [카카오 디벨로퍼스](https://developers.kakao.com) > 내 애플리케이션 > 앱 키 | 주변 식당 검색, 행정동 조회 |
 | `NEXT_PUBLIC_KAKAO_JS_KEY` | 지도 표시 시 | 같은 앱의 **JavaScript 키** + 플랫폼 > Web에 도메인 등록 | 결과 지도 |
-| `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 선택 | [네이버 개발자센터](https://developers.naver.com) > 검색 API | 네이버 장소 매칭 보조 |
+| `NAVER_HUB_CLIENT_ID` / `NAVER_HUB_CLIENT_SECRET` | 선택 | 네이버 클라우드 콘솔 > Services > Application Services > **NAVER API HUB** > Application 등록 (검색 API) | 블로그 리뷰, 대체 사진, 네이버 장소 매칭 |
+| `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 선택 | 네이버 개발자센터 검색 API (**2026-07-31 신규 발급 종료**, 기존 키만) | 위와 같음. HUB 키가 있으면 HUB를 우선 사용 |
 | `ANTHROPIC_API_KEY` | 선택 | [Claude Console](https://console.anthropic.com) | 자유 입력 해석, 리뷰 기반 재정렬·추천 이유 |
 | `CLAUDE_MODEL` | 선택 | | 기본 `claude-opus-5-5`. 비용을 줄이려면 `claude-haiku-5-5` 등 |
 | `UNOFFICIAL_REVIEWS` | | | `0`이면 비공식 리뷰 수집 끔 |

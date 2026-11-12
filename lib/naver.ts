@@ -4,6 +4,41 @@ import type { BasePlace, BlogReview, LatLng, NaverReviewInfo } from "./types";
 import { BROWSER_UA, TTLCache, collectStrings, deepFind, fetchWithTimeout, haversine, nameSimilarity, normalizeName, toNumber } from "./util";
 
 /**
+ * [공식] 네이버 검색 API 설정.
+ * 2026-07-31부터 네이버 개발자센터 신규 발급이 끝나고 네이버 클라우드의 NAVER API HUB로 옮겨갔다.
+ * - API HUB (우선): NAVER_HUB_CLIENT_ID / NAVER_HUB_CLIENT_SECRET
+ *   https://naverapihub.apigw.ntruss.com/search/v1/{blog|image|local}, X-NCP-APIGW-API-KEY-ID / X-NCP-APIGW-API-KEY 헤더
+ * - 개발자센터 (구, 기존 발급 키만): NAVER_CLIENT_ID / NAVER_CLIENT_SECRET
+ *   https://openapi.naver.com/v1/search/{blog.json|image|local.json}, X-Naver-Client-Id / X-Naver-Client-Secret 헤더
+ * 요청 파라미터와 응답 형식은 같다.
+ */
+type SearchKind = "blog" | "image" | "local";
+
+function naverSearchConfig(): { url: (kind: SearchKind) => string; headers: Record<string, string> } | null {
+  const hubId = process.env.NAVER_HUB_CLIENT_ID;
+  const hubSecret = process.env.NAVER_HUB_CLIENT_SECRET;
+  if (hubId && hubSecret) {
+    return {
+      url: (kind) => `https://naverapihub.apigw.ntruss.com/search/v1/${kind}`,
+      headers: { "X-NCP-APIGW-API-KEY-ID": hubId, "X-NCP-APIGW-API-KEY": hubSecret },
+    };
+  }
+  const id = process.env.NAVER_CLIENT_ID;
+  const secret = process.env.NAVER_CLIENT_SECRET;
+  if (id && secret) {
+    return {
+      url: (kind) => `https://openapi.naver.com/v1/search/${kind === "image" ? "image" : `${kind}.json`}`,
+      headers: { "X-Naver-Client-Id": id, "X-Naver-Client-Secret": secret },
+    };
+  }
+  return null;
+}
+
+export function naverSearchEnabled() {
+  return naverSearchConfig() !== null;
+}
+
+/**
  * 네이버 지도 장소 후보 (비공식 검색 or 공식 검색 API에서 얻음)
  */
 interface NaverCandidate {
@@ -84,17 +119,14 @@ export async function naverMapSearch(query: string, loc: LatLng, budget?: Budget
  * 비공식 검색이 막혔을 때 최소한 네이버 지도 링크를 정확히 걸기 위한 보조 수단.
  */
 export async function naverOfficialLocal(query: string, budget?: Budget): Promise<NaverCandidate[]> {
-  const id = process.env.NAVER_CLIENT_ID;
-  const secret = process.env.NAVER_CLIENT_SECRET;
-  if (!id || !secret) return [];
+  const cfg = naverSearchConfig();
+  if (!cfg) return [];
   const cached = officialCache.get(query);
   if (cached) return cached;
   if (budget && !budget.take()) return [];
   try {
     const params = new URLSearchParams({ query, display: "5", sort: "random" });
-    const res = await fetchWithTimeout(`https://openapi.naver.com/v1/search/local.json?${params}`, {
-      headers: { "X-Naver-Client-Id": id, "X-Naver-Client-Secret": secret },
-    });
+    const res = await fetchWithTimeout(`${cfg.url("local")}?${params}`, { headers: cfg.headers });
     if (!res.ok) return [];
     const data = (await res.json()) as { items: Array<{ title: string; mapx: string; mapy: string }> };
     const out = data.items.map((it) => ({
@@ -205,13 +237,6 @@ export function naverSearchUrl(name: string) {
 const blogCache = new TTLCache<{ items: BlogReview[]; total: number } | null>(6 * 60 * 60 * 1000, 500);
 const imageCache = new TTLCache<string[] | null>(6 * 60 * 60 * 1000, 500);
 
-export function naverSearchEnabled() {
-  return Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET);
-}
-
-function naverHeaders() {
-  return { "X-Naver-Client-Id": process.env.NAVER_CLIENT_ID!, "X-Naver-Client-Secret": process.env.NAVER_CLIENT_SECRET! };
-}
 
 /** 가게 이름의 핵심 부분 (지점명/공백 제거) — 블로그 글이 정말 이 가게 얘기인지 거르는 데 쓴다 */
 function coreName(name: string) {
@@ -222,7 +247,8 @@ function coreName(name: string) {
  * [공식] 네이버 블로그 검색. "동네 + 가게명"으로 검색하고, 제목/본문에 가게명이 들어간 글만 남긴다.
  */
 export async function naverBlogSearch(name: string, region: string | null, budget?: Budget): Promise<{ items: BlogReview[]; total: number } | null> {
-  if (!naverSearchEnabled()) return null;
+  const cfg = naverSearchConfig();
+  if (!cfg) return null;
   const dong = region?.split(" ").pop() ?? "";
   const query = `${dong} ${name}`.trim();
   const cached = blogCache.get(query);
@@ -230,13 +256,19 @@ export async function naverBlogSearch(name: string, region: string | null, budge
   if (budget && !budget.take()) return null;
   try {
     const params = new URLSearchParams({ query, display: "30", sort: "sim" });
-    const res = await fetchWithTimeout(`https://openapi.naver.com/v1/search/blog.json?${params}`, { headers: naverHeaders() });
+    const res = await fetchWithTimeout(`${cfg.url("blog")}?${params}`, { headers: cfg.headers });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as {
       total: number;
       items: Array<{ title: string; link: string; description: string; bloggername: string; postdate: string }>;
     };
+    // 블로그 글이 이 가게 얘기인지: 전체 이름 또는 첫 단어(2글자 이상)가 제목/본문에 있어야 한다
     const core = coreName(name);
+    const firstWord = normalizeName(name.split(/\s+/)[0] ?? "");
+    const mentions = (text: string) => {
+      const t = normalizeName(text);
+      return !core || t.includes(core) || (firstWord.length >= 2 && t.includes(firstWord));
+    };
     const items = data.items
       .map(
         (it): BlogReview => ({
@@ -249,7 +281,7 @@ export async function naverBlogSearch(name: string, region: string | null, budge
           source: "naver",
         }),
       )
-      .filter((b) => !core || normalizeName(`${b.title} ${b.snippet}`).includes(core))
+      .filter((b) => mentions(`${b.title} ${b.snippet}`))
       .slice(0, 15);
     const out = { items, total: data.total };
     blogCache.set(query, out);
@@ -262,7 +294,8 @@ export async function naverBlogSearch(name: string, region: string | null, budge
 
 /** [공식] 네이버 이미지 검색 — 카카오 사진이 없을 때 대체 사진으로 쓴다 (네이버 검색 썸네일 주소) */
 export async function naverImageSearch(name: string, region: string | null, budget?: Budget): Promise<string[] | null> {
-  if (!naverSearchEnabled()) return null;
+  const cfg = naverSearchConfig();
+  if (!cfg) return null;
   const dong = region?.split(" ").pop() ?? "";
   const query = `${dong} ${name}`.trim();
   const cached = imageCache.get(query);
@@ -270,7 +303,7 @@ export async function naverImageSearch(name: string, region: string | null, budg
   if (budget && !budget.take()) return null;
   try {
     const params = new URLSearchParams({ query, display: "12", sort: "sim", filter: "medium" });
-    const res = await fetchWithTimeout(`https://openapi.naver.com/v1/search/image?${params}`, { headers: naverHeaders() });
+    const res = await fetchWithTimeout(`${cfg.url("image")}?${params}`, { headers: cfg.headers });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { items: Array<{ thumbnail: string; link: string }> };
     const out = data.items.map((i) => normalizeImageUrl(i.thumbnail)).filter((u): u is string => Boolean(u));
