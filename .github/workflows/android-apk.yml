@@ -119,10 +119,11 @@ jobs:
             adb shell pm grant com.ryuseongcheol.matjip android.permission.ACCESS_FINE_LOCATION || true
             adb shell monkey -p com.ryuseongcheol.matjip -c android.intent.category.LAUNCHER 1
             sleep 40
-            (adb shell pidof com.ryuseongcheol.matjip && echo "SMOKE: APP_RUNNING") || echo "SMOKE: APP_NOT_RUNNING"
+            echo "===== crash 버퍼 =====" ; adb logcat -d -b crash -v brief | head -120 || true
             adb logcat -d -v brief > logcat.txt || true
-            echo "===== 오류 로그 ====="; grep -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|E/ReactNative|Exception|Error:" logcat.txt | grep -v -E "chatty|Watchdog" | head -150 || true
+            echo "===== JS 로그 =====" ; grep -E "ReactNativeJS|E/ReactNative" logcat.txt | head -80 || true
             adb exec-out screencap -p > screen.png || true
+            adb shell pidof com.ryuseongcheol.matjip && echo "SMOKE: APP_RUNNING" || (echo "SMOKE: APP_NOT_RUNNING"; exit 1)
 
       - uses: actions/upload-artifact@v4
         if: always()

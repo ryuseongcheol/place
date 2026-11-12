@@ -37,7 +37,7 @@ jobs:
             adb shell pm grant com.ryuseongcheol.matjip android.permission.ACCESS_FINE_LOCATION || true
             adb shell am start -W -n com.ryuseongcheol.matjip/.MainActivity || true
             sleep 30
-            (adb shell pidof com.ryuseongcheol.matjip && echo "SMOKE: APP_RUNNING") || echo "SMOKE: APP_NOT_RUNNING"
             echo "===== crash 버퍼 =====" ; adb logcat -d -b crash -v brief | head -120 || true
             adb logcat -d -v brief > logcat.txt || true
-            echo "===== 앱 관련 로그 =====" ; grep -E "matjip|ReactNativeJS|ReactNative|Hermes|SoLoader|UnsatisfiedLink|Fatal signal|SIGSEGV|SIGABRT|DEBUG  |libc  |FATAL|expo|Expo" logcat.txt | grep -v -E "chatty" | head -200 || true
+            echo "===== 앱 관련 로그 =====" ; grep -E "matjip|ReactNativeJS|ReactNative|Hermes|SoLoader|UnsatisfiedLink|Fatal signal|SIGSEGV|SIGABRT|FATAL" logcat.txt | grep -v -E "chatty" | head -200 || true
+            adb shell pidof com.ryuseongcheol.matjip && echo "SMOKE: APP_RUNNING" || (echo "SMOKE: APP_NOT_RUNNING"; exit 1)

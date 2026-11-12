@@ -39,8 +39,16 @@ const config: ExpoConfig = {
     [
       "expo-build-properties",
       {
-        // 네이버 지도 Android SDK는 Maven Central이 아니라 네이버 저장소에 있다
-        android: { extraMavenRepos: ["https://repository.map.naver.com/archive/maven"] },
+        android: {
+          // 네이버 지도 Android SDK는 Maven Central이 아니라 네이버 저장소에 있다
+          extraMavenRepos: ["https://repository.map.naver.com/archive/maven"],
+          // 백그라운드 수집(WorkManager)의 Room DB 클래스를 출시 빌드 최적화(R8)가 지워 시작하자마자 죽던 문제
+          extraProguardRules: [
+            "-keep class androidx.work.** { *; }",
+            "-keep class * extends androidx.room.RoomDatabase { <init>(); }",
+            "-keep class androidx.room.** { *; }",
+          ].join("\n"),
+        },
       },
     ],
     ["expo-location", { locationWhenInUsePermission: LOCATION_MESSAGE }],
