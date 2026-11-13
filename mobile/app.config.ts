@@ -43,6 +43,14 @@ const config: ExpoConfig = {
       monochromeImage: "./assets/android-icon-monochrome.png",
     },
     permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "CAMERA"],
+    // Expo 기본 템플릿이 넣는 안 쓰는 권한 제거. 특히 "다른 앱 위에 표시"(SYSTEM_ALERT_WINDOW)는
+    // 알림 접근과 같이 있으면 Play 프로텍트가 금융 사기 앱으로 의심하는 조합이다.
+    // 사진은 시스템 사진 선택기를 써서 저장소 권한이 필요 없다.
+    blockedPermissions: [
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+    ],
     predictiveBackGestureEnabled: false,
   },
   extra: {

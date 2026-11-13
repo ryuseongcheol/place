@@ -120,6 +120,8 @@ jobs:
           script: |
             adb install -r "$(ls apk/*.apk | head -1)"
             adb shell dumpsys package com.ryuseongcheol.matjip | grep -E "versionCode|versionName" | head -2
+            adb shell dumpsys package com.ryuseongcheol.matjip | sed -n '/requested permissions:/,/install permissions:/p' | head -30
+            adb shell dumpsys package com.ryuseongcheol.matjip | sed -n '/requested permissions:/,/install permissions:/p' | grep -qE "SYSTEM_ALERT_WINDOW|READ_SMS|RECEIVE_SMS|EXTERNAL_STORAGE" && (echo "SMOKE: RISKY_PERMISSION"; exit 1) || echo "SMOKE: PERMISSIONS_OK"
             adb logcat -c
             adb shell pm grant com.ryuseongcheol.matjip android.permission.ACCESS_FINE_LOCATION || true
             adb shell monkey -p com.ryuseongcheol.matjip -c android.intent.category.LAUNCHER 1
