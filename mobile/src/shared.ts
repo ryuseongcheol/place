@@ -6,3 +6,4 @@ export { haversine, nameSimilarity, normalizeName, toNumber } from "../../lib/ut
 export { SHOWS, applyShows, mergeShows, showKind, showLabel } from "../../lib/shows";
 export { categoryIcon } from "../../lib/categoryIcon";
 export { dongCore, sameBranch, shortArea, splitBranch } from "../../lib/placeName";
+export { parsePaymentNotification, type ParsedPayment } from "../../lib/paymentParse";

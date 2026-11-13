@@ -145,3 +145,23 @@ export function crawlShows(region: Region, places: Array<Pick<CrawledPlace, "id"
     body: JSON.stringify({ region: { lat: region.lat, lng: region.lng }, places: places.map((p) => ({ id: p.id, name: p.name })) }),
   }, 60000);
 }
+
+export interface MerchantMatchItem {
+  id: string;
+  merchant: string;
+  lat?: number | null;
+  lng?: number | null;
+}
+export type MerchantMatchResult =
+  | { status: "matched"; place: import("./placeSnap").PlaceSnap & { categoryGroup?: string }; confidence: number }
+  | { status: "notFood"; reason: string; place?: import("./placeSnap").PlaceSnap }
+  | { status: "unmatched" };
+
+/** 결제 알림 가맹점 이름 → 카카오 장소 (한 번에 최대 20곳 처리, 남은 건 다음에) */
+export function matchMerchants(items: MerchantMatchItem[]) {
+  return request<{ results: Array<{ id: string; result: MerchantMatchResult }> }>(
+    "/api/match/merchants",
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) },
+    30000,
+  );
+}

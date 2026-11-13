@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, 
 import { fetchPlaceDetail } from "./api";
 import { useMyNotes } from "./myNotes";
 import { MAX_MY_PHOTOS, deletePhotoFile, pickFromLibrary, takePhoto } from "./myPhotos";
+import MyVisits from "./MyVisits";
 import PhotoViewer from "./PhotoViewer";
 import { lookupNaverPlace, naverBookingUrl, naverMapSearchUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
 import { mergeShows, shortArea } from "./shared";
@@ -173,8 +174,11 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
 
       {/* 내 평가: 별점 + 메모 (기기에 저장) */}
       <MyReview place={p} colors={c} />
+      {/* 내 방문·결제 기록 (결제 알림 자동 기록 또는 직접 추가) */}
+      <MyVisits place={p} colors={c} />
 
-      {/* 추천 이유 */}
+      {/* 추천 이유 (타임라인·저장 기록에서 연 경우엔 없음) */}
+      {!!p.reason && (
       <View style={[styles.reasonBox, { backgroundColor: c.accentSoft }]}>
         <Text style={{ fontSize: 12, fontWeight: "700", color: c.accent, marginBottom: 4 }}>
           {p.aiRanked ? `AI 추천 이유 · 적합도 ${p.score}` : `추천 점수 ${p.score}`}
@@ -190,6 +194,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
           </View>
         )}
       </View>
+      )}
 
       {/* 정보 */}
       <Section c={c} title="정보">
@@ -427,6 +432,11 @@ function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors 
     setSavedAt(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.id]);
+  // 예전 평가에 식당 정보가 없으면 채워서 타임라인에서 다시 열 수 있게
+  useEffect(() => {
+    notes.attachPlace(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.id, !!mine]);
   const dirty = memo !== (mine?.memo ?? "");
   const photos = mine?.photos ?? [];
   const [viewer, setViewer] = useState<number | null>(null);
@@ -438,7 +448,7 @@ function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors 
     setAdding(true);
     try {
       const added = from === "library" ? await pickFromLibrary(p.id, remaining) : await takePhoto(p.id);
-      if (added.length) notes.save(p.id, p.name, { photos: [...(notes.get(p.id)?.photos ?? []), ...added].slice(0, MAX_MY_PHOTOS) });
+      if (added.length) notes.save(p, { photos: [...(notes.get(p.id)?.photos ?? []), ...added].slice(0, MAX_MY_PHOTOS) });
     } catch (e) {
       Alert.alert("사진을 추가하지 못했어요", e instanceof Error ? e.message : "");
     } finally {
@@ -461,7 +471,7 @@ function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors 
         text: "삭제",
         style: "destructive",
         onPress: () => {
-          notes.save(p.id, p.name, { photos: photos.filter((u) => u !== uri) });
+          notes.save(p, { photos: photos.filter((u) => u !== uri) });
           deletePhotoFile(uri);
         },
       },
@@ -481,7 +491,7 @@ function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors 
           return (
             <Pressable
               key={n}
-              onPress={() => notes.save(p.id, p.name, { rating: mine?.rating === n ? null : n })}
+              onPress={() => notes.save(p, { rating: mine?.rating === n ? null : n })}
               hitSlop={6}
               accessibilityRole="button"
               accessibilityLabel={`내 별점 ${n}점`}
@@ -525,7 +535,7 @@ function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors 
         {savedAt && !dirty ? <Text style={{ fontSize: 12, color: c.naver }}>저장됨</Text> : null}
         <Pressable
           onPress={() => {
-            notes.save(p.id, p.name, { memo: memo.trim() });
+            notes.save(p, { memo: memo.trim() });
             setSavedAt(Date.now());
           }}
           disabled={!dirty}

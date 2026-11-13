@@ -3,6 +3,9 @@ import { ActivityIndicator, Alert, Linking, Modal, Pressable, ScrollView, StyleS
 import { SafeAreaView } from "react-native-safe-area-context";
 import { regionAtLocation, searchRegions, type RegionHit } from "./api";
 import { APP_VERSION, BUILD_NUMBER, COMMIT, checkLatestRelease, type LatestRelease } from "./appVersion";
+import { openAppDetails, openNotificationAccessSettings } from "../modules/payment-notifications";
+import { usePaymentAccess } from "./paymentAccess";
+import { syncPayments, usePayments } from "./payments";
 import { MAX_REGIONS, useRegions } from "./regions";
 import { RADII } from "./SearchPanel";
 import type { Colors } from "./theme";
@@ -25,6 +28,9 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [latest, setLatest] = useState<LatestRelease | null | "checking" | "failed">(null);
+  const access = usePaymentAccess();
+  const { list: payments } = usePayments();
+  const [paySync, setPaySync] = useState<string | null>(null);
 
   const checkUpdate = async () => {
     setLatest("checking");
@@ -177,6 +183,67 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
           <Text style={[styles.desc, { color: c.muted, marginTop: 8 }]}>
             수집은 앱이 켜져 있는 동안 진행되고, 앱을 다시 켜면 이어서 해요. 지역당 최대 1,200곳의 카카오 별점·메뉴·후기와 네이버 리뷰 수·키워드 리뷰를 모아 숨은 분류값을 계산하고, 서버에 Claude 키가 있으면 AI가 한 번 더 분류해요.
           </Text>
+
+          <Text style={[styles.h2, { color: c.text, marginTop: 28 }]}>결제 알림 기록</Text>
+          <Text style={[styles.desc, { color: c.muted }]}>
+            카드사·네이버페이·카카오페이·토스 결제 알림(문자 포함)을 읽어, 결제한 순간의 위치 근처에서 가게를 찾아 내 타임라인에 방문으로 남겨요. 알림 내용은 이 휴대폰에만 저장되고, 서버에는 가게 이름과 위치만 보내 가게를 찾아요.
+          </Text>
+          <View style={[styles.region, { backgroundColor: c.surface, borderColor: c.line, marginTop: 10 }]}>
+            {!access.supported ? (
+              <Text style={{ color: c.muted, fontSize: 13 }}>이 설치 버전(또는 웹 미리보기)에서는 사용할 수 없어요. 최신 안드로이드 APK가 필요해요.</Text>
+            ) : (
+              <>
+                <Text style={{ fontSize: 15, fontWeight: "700", color: access.enabled ? c.naver : c.errorText }}>
+                  {access.enabled ? "● 켜져 있어요" : "○ 꺼져 있어요"}
+                </Text>
+                <Text style={{ fontSize: 12, color: c.muted, marginTop: 6, lineHeight: 18 }}>
+                  {[
+                    `기록 ${payments.filter((p) => p.status === "matched" && !p.hidden).length}건`,
+                    payments.some((p) => p.status === "unmatched") ? `가게 못 찾음 ${payments.filter((p) => p.status === "unmatched" && !p.hidden).length}건` : null,
+                    access.status?.lastCapturedAt ? `마지막 결제 알림 ${new Date(access.status.lastCapturedAt).toLocaleString("ko-KR")}` : "아직 받은 결제 알림 없음",
+                    access.status?.pendingCount ? `정리 대기 ${access.status.pendingCount}건` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Text>
+                <View style={styles.regionActions}>
+                  <Pressable onPress={openNotificationAccessSettings} hitSlop={6}>
+                    <Text style={{ color: c.accent, fontSize: 13, fontWeight: "700" }}>{access.enabled ? "알림 접근 설정" : "알림 접근 켜기"}</Text>
+                  </Pressable>
+                  {access.enabled && (
+                    <Pressable
+                      onPress={async () => {
+                        setPaySync("가져오는 중…");
+                        try {
+                          const r = await syncPayments({ fallbackLoc: me, force: true });
+                          setPaySync(`새 결제 ${r.added}건 · 가게 찾음 ${r.matched}건`);
+                        } catch (e) {
+                          setPaySync(e instanceof Error ? e.message : "실패");
+                        }
+                        access.refresh();
+                      }}
+                      hitSlop={6}
+                    >
+                      <Text style={{ color: c.text, fontSize: 13, fontWeight: "600" }}>지금 가져오기</Text>
+                    </Pressable>
+                  )}
+                </View>
+                {paySync && <Text style={{ fontSize: 12, color: c.muted, marginTop: 8 }}>{paySync}</Text>}
+                {!access.enabled && (
+                  <View style={[styles.toast, { backgroundColor: c.warnBg, marginTop: 12 }]}>
+                    <Text style={{ color: c.warnText, fontSize: 13, lineHeight: 19 }}>
+                      안드로이드 13 이상에서 APK로 설치한 앱은 알림 접근 스위치가 회색으로 막혀 있을 수 있어요.{"\n"}
+                      1) 아래 "앱 정보 열기" → 오른쪽 위 ⋮ → "제한된 설정 허용"{"\n"}
+                      2) 다시 "알림 접근 켜기" → 근처맛집 허용
+                    </Text>
+                    <Pressable onPress={openAppDetails} hitSlop={6} style={{ marginTop: 8 }}>
+                      <Text style={{ color: c.warnText, fontSize: 13, fontWeight: "800" }}>앱 정보 열기 ›</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
 
           <Text style={[styles.h2, { color: c.text, marginTop: 28 }]}>앱 정보</Text>
           <View style={[styles.region, { backgroundColor: c.surface, borderColor: c.line, marginTop: 10 }]}>

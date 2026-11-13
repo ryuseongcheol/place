@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { AppState, BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { fetchRecommendations, fetchThemes, rerankRecommendations, searchDb } from "./src/api";
 import BottomSheet, { type BottomSheetRef, type SheetSnap } from "./src/BottomSheet";
@@ -15,6 +15,9 @@ import { ListHeader, PlaceList } from "./src/PlaceList";
 import PlacesMap, { type PlacesMapRef } from "./src/PlacesMap";
 import { checkLatestRelease } from "./src/appVersion";
 import { registerBackgroundCrawl } from "./src/backgroundCrawl";
+import { syncPayments } from "./src/payments";
+import { snapToScored } from "./src/placeSnap";
+import TimelineScreen from "./src/TimelineScreen";
 import { RegionsProvider, useRegions } from "./src/regions";
 import SaveSheet, { GroupEditor } from "./src/SaveSheet";
 import SearchPanel from "./src/SearchPanel";
@@ -91,6 +94,7 @@ function MapScreen() {
   // 화면 상태
   const [searchOpen, setSearchOpen] = useState(true); // 앱 실행 시 추천 팝업
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
   const [layer, setLayer] = useState<"results" | "favorites">("results");
   const [favGroupId, setFavGroupId] = useState<string | null>(null);
@@ -124,6 +128,18 @@ function MapScreen() {
   }, []);
 
   const me = loc.status === "locating" ? null : { lat: loc.lat, lng: loc.lng };
+  // 결제 알림 가져오기: 앱을 켤 때, 다시 앞으로 올 때
+  const meRef = useRef(me);
+  meRef.current = loc.status === "ok" ? me : null;
+  useEffect(() => {
+    const run = () => syncPayments({ fallbackLoc: meRef.current }).catch(() => {});
+    const t = setTimeout(run, 1500);
+    const sub = AppState.addEventListener("change", (st) => st === "active" && run());
+    return () => {
+      clearTimeout(t);
+      sub.remove();
+    };
+  }, []);
   const distanceOf = useCallback((p: ScoredPlace) => (me ? Math.round(haversine(me, p)) : null), [me?.lat, me?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 정렬: 목록과 지도 번호가 같은 순서를 쓴다
@@ -149,7 +165,10 @@ function MapScreen() {
     [sortMode, distanceOf, notes],
   );
   const resultPlaces = useMemo(() => sortPlaces(results?.places ?? []), [results, sortPlaces]);
-  const mapPlaces = layer === "favorites" ? sortPlaces(fav.placesIn(favGroupId)) : resultPlaces;
+  const listPlaces = layer === "favorites" ? sortPlaces(fav.placesIn(favGroupId)) : resultPlaces;
+  // 타임라인 등 목록 밖에서 연 식당도 지도에 보이게
+  const mapPlaces =
+    sheet.mode === "detail" && snap !== "closed" && !listPlaces.some((p) => p.id === sheet.place.id) ? [...listPlaces, sheet.place] : listPlaces;
 
   const sortBar = (
     <View style={{ flexDirection: "row", gap: 6, paddingHorizontal: 16, paddingBottom: 10 }}>
@@ -310,7 +329,7 @@ function MapScreen() {
   // 안드로이드 뒤로가기
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (webTarget || settingsOpen || savePlace) return false;
+      if (webTarget || settingsOpen || savePlace || timelineOpen) return false;
       if (searchOpen) {
         setSearchOpen(false);
         return true;
@@ -468,6 +487,17 @@ function MapScreen() {
           </Pressable>
         </View>
       )}
+      {/* 내 타임라인 (내 위치 버튼 위) */}
+      {snap === "closed" && !searchOpen && (
+        <Pressable
+          style={[styles.round, styles.timelineBtn, { bottom: insets.bottom + 20 + 58, backgroundColor: c.surface }]}
+          onPress={() => setTimelineOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="내 타임라인"
+        >
+          {iconsReady ? <MaterialCommunityIcons name="timeline-text-outline" size={22} color={c.text} /> : <Text style={{ fontSize: 16 }}>🕘</Text>}
+        </Pressable>
+      )}
       {snap === "closed" && !searchOpen && results && layer === "results" && results.places.length > 0 && (
         <Pressable style={[styles.listBtn, { bottom: insets.bottom + 84, backgroundColor: c.surface }]} onPress={() => showList({ mode: "results" })}>
           <Text style={{ fontSize: 13, fontWeight: "700", color: c.text }}>☰ 목록 {results.places.length}</Text>
@@ -508,6 +538,13 @@ function MapScreen() {
         />
       )}
 
+      <TimelineScreen
+        visible={timelineOpen}
+        onClose={() => setTimelineOpen(false)}
+        onOpenPlace={(snapPlace) => openDetail(snapToScored(snapPlace), null)}
+        colors={c}
+        me={me}
+      />
       <SettingsScreen visible={settingsOpen} onClose={() => setSettingsOpen(false)} colors={c} me={me} radius={radius} setRadius={setRadius} />
       <SaveSheet place={savePlace} onClose={() => setSavePlace(null)} colors={c} />
       <GroupEditor visible={editingGroup !== null} group={editingGroup === "new" ? null : editingGroup} colors={c} onClose={() => setEditingGroup(null)} />
@@ -524,5 +561,6 @@ const styles = StyleSheet.create({
   recommendBtn: { height: 52, borderRadius: 26, paddingHorizontal: 24, alignItems: "center", justifyContent: "center", ...shadow },
   recommendText: { color: "#fff", fontSize: 17, fontWeight: "800" },
   round: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", ...shadow },
+  timelineBtn: { position: "absolute", right: 12 },
   listBtn: { position: "absolute", alignSelf: "center", height: 36, borderRadius: 18, paddingHorizontal: 14, justifyContent: "center", ...shadow },
 });

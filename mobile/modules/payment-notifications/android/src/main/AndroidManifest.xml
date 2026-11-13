@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- 카드사·페이 앱의 결제 알림을 읽어 방문 기록을 만든다 (설정 > 알림 접근 허용 필요) -->
+    <service
+      android:name="expo.modules.paymentnotifications.PaymentNotificationListener"
+      android:label="결제 알림으로 맛집 방문 기록"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+    </service>
+  </application>
+</manifest>
