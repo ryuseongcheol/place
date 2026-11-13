@@ -53,6 +53,8 @@ export interface ScoredPlace extends BasePlace {
   fit?: number;
   /** 출연한 방송·가이드 id (lib/shows.ts) */
   shows?: string[];
+  /** 결과에서 묶여 숨겨진 같은 이름(체인) 지점 수 */
+  otherBranches?: number;
 }
 
 export interface ThemeQuery {

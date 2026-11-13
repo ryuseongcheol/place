@@ -127,7 +127,8 @@ const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
             height={H}
             anchor={{ x: 0.5, y: 1 }}
             zIndex={active ? 100 : places.length - i}
-            caption={{ text: p.name, textSize: active ? 13 : 11, haloColor: "#ffffff", requestedWidth: 120 }}
+            // 가게 이름: 흰 글씨 + 어두운 테두리 (밝은 지도에서도 읽히게)
+            caption={{ text: p.name, textSize: active ? 13 : 11, color: "#FFFFFF", haloColor: "#1F1A14", requestedWidth: 120 }}
             isHideCollidedCaptions
             onTap={() => onSelect(p)}
           >

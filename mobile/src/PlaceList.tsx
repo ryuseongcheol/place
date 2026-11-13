@@ -1,5 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { formatDistance } from "./PlaceDetailView";
+import { useMyNotes } from "./myNotes";
+import { shortArea } from "./shared";
 import ShowBadges from "./ShowBadges";
 import type { Colors } from "./theme";
 import type { ScoredPlace } from "./types";
@@ -38,6 +40,7 @@ interface Props {
 }
 
 export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, numbered, notices, badgeColor }: Props) {
+  const notes = useMyNotes();
   return (
     <View>
       {notices?.map((n) => (
@@ -66,6 +69,18 @@ export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, nu
                 ]
                   .filter(Boolean)
                   .join(" · ")}
+              </Text>
+              {/* 어느 지점인지: 동네 · 도로명, 묶인 다른 지점 수, 내 평가 */}
+              <Text style={{ fontSize: 12, color: c.muted, marginTop: 2 }} numberOfLines={1}>
+                {[
+                  shortArea(p) || null,
+                  p.otherBranches ? `다른 지점 ${p.otherBranches}곳` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                {notes.get(p.id)?.rating ? <Text style={{ color: "#F5A400", fontWeight: "700" }}>{`  내 ★${notes.get(p.id)!.rating}`}</Text> : null}
+                {notes.get(p.id)?.memo ? <Text>{"  📝"}</Text> : null}
+                {notes.get(p.id)?.photos?.length ? <Text>{`  📷${notes.get(p.id)!.photos!.length}`}</Text> : null}
               </Text>
               <ShowBadges shows={p.shows} size="sm" />
               {numbered && (

@@ -16,8 +16,29 @@ export type WebTarget =
       url: string;
       /** 네이버 검색 결과에서 가게를 누르면 그 가게의 방문자 리뷰 탭으로 바로 보낸다 */
       naverToReviews?: boolean;
+      /** 네이버 검색 결과에서 가게를 누르면 그 가게의 예약 탭으로 바로 보낸다 */
+      naverToBooking?: boolean;
     }
   | { title: string; photos: string[]; index: number };
+
+/** 웹뷰가 부른 앱 링크 열기. intent:// 는 안의 scheme 으로 바꿔 열고, 안 되면 대체 웹 주소로 */
+async function openExternal(url: string) {
+  try {
+    if (url.startsWith("intent:")) {
+      const scheme = url.match(/;scheme=([^;]+)/)?.[1];
+      const fallback = url.match(/;S\.browser_fallback_url=([^;]+)/)?.[1];
+      const pkg = url.match(/;package=([^;]+)/)?.[1];
+      const target = scheme ? url.replace(/^intent:/, `${scheme}:`).replace(/#Intent;.*$/, "") : null;
+      if (target && (await Linking.canOpenURL(target).catch(() => false))) return Linking.openURL(target);
+      if (fallback) return Linking.openURL(decodeURIComponent(fallback));
+      if (pkg) return Linking.openURL(`market://details?id=${pkg}`);
+      return;
+    }
+    await Linking.openURL(url);
+  } catch {
+    // 열 수 있는 앱이 없으면 무시
+  }
+}
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
@@ -104,16 +125,28 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
               ref={ref}
               source={{ uri }}
               onShouldStartLoadWithRequest={(req) => {
-                if ("naverToReviews" in target && target.naverToReviews) {
+                // 결제(네이버페이 등)·로그인 앱 호출: 웹뷰 밖 앱으로 넘긴다
+                if (!/^(https?|about|data|blob):/i.test(req.url)) {
+                  openExternal(req.url);
+                  return false;
+                }
+                const toReviews = "naverToReviews" in target && target.naverToReviews;
+                const toBooking = "naverToBooking" in target && target.naverToBooking;
+                if (toReviews || toBooking) {
                   const m = req.url.match(NAVER_PLACE) ?? req.url.match(NAVER_PCMAP);
                   const id = m ? (m[3] ?? m[2]) : null;
                   if (id && /^\d+$/.test(id)) {
-                    setUri(`https://m.place.naver.com/restaurant/${id}/review/visitor`);
+                    setUri(`https://m.place.naver.com/restaurant/${id}/${toBooking ? "booking" : "review/visitor"}`);
                     return false;
                   }
                 }
                 return true;
               }}
+              // 네이버 로그인 유지 (예약에 필요)
+              sharedCookiesEnabled
+              thirdPartyCookiesEnabled
+              domStorageEnabled
+              javaScriptEnabled
               onNavigationStateChange={(s: WebViewNavigation) => {
                 setCanGoBack(s.canGoBack);
                 setCurrentUrl(s.url);

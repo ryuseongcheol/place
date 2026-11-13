@@ -1,9 +1,12 @@
 import { Image } from "expo-image";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { fetchPlaceDetail } from "./api";
-import { naverMapSearchUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
-import { mergeShows } from "./shared";
+import { useMyNotes } from "./myNotes";
+import { MAX_MY_PHOTOS, deletePhotoFile, pickFromLibrary, takePhoto } from "./myPhotos";
+import PhotoViewer from "./PhotoViewer";
+import { lookupNaverPlace, naverBookingUrl, naverMapSearchUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
+import { mergeShows, shortArea } from "./shared";
 import ShowBadges from "./ShowBadges";
 import { callPhone, openKakaoMap, openNaverMap } from "./openMap";
 import type { Colors } from "./theme";
@@ -54,6 +57,11 @@ export function PlaceHeader({
             {!!p.naver?.blogReviewCount && <Text style={{ fontSize: 13, color: c.muted }}>블로그 {p.naver.blogReviewCount.toLocaleString()}</Text>}
             {distance != null && <Text style={{ fontSize: 13, color: c.muted }}>{formatDistance(distance)}</Text>}
           </View>
+          {!!shortArea(p) && (
+            <Text style={{ fontSize: 12, color: c.muted, marginTop: 3 }} numberOfLines={1}>
+              📍 {shortArea(p)}
+            </Text>
+          )}
           <ShowBadges shows={p.shows} />
         </View>
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기" style={styles.iconBtn}>
@@ -81,6 +89,18 @@ function dongOf(address: string) {
 /** 시트 본문: 액션 버튼, 사진, 추천 이유, 정보, 메뉴, 리뷰, 블로그 리뷰 */
 export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: BodyProps) {
   const [findingNaver, setFindingNaver] = useState(false);
+  const [findingBooking, setFindingBooking] = useState(false);
+
+  // 네이버 예약: 앱 안 웹뷰에서 예약까지 (네이버 로그인은 한 번 하면 유지)
+  const openBooking = async () => {
+    const title = `${p.name} 예약`;
+    setFindingBooking(true);
+    const info = await lookupNaverPlace(p).catch(() => null);
+    setFindingBooking(false);
+    const naverId = info?.id ?? p.naver?.naverId ?? null;
+    if (naverId) openWeb({ title, url: naverBookingUrl(naverId, info?.bookingUrl) });
+    else openWeb({ title, url: naverMapSearchUrl(p.name, dongOf(p.address)), naverToBooking: true });
+  };
   const [detail, setDetail] = useState<PlaceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +145,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
       <View style={[styles.actions, { borderColor: c.line }]}>
         <Action c={c} icon={isFavorite ? "★" : "☆"} label={isFavorite ? "저장됨" : "저장"} active={isFavorite} onPress={onSave} />
         <Action c={c} icon="➜" label="길찾기" onPress={() => openNaverMap(p)} />
+        <Action c={c} icon={findingBooking ? "…" : "📅"} label="예약" onPress={openBooking} disabled={findingBooking} />
         <Action c={c} icon="☎" label="전화" disabled={!p.phone} onPress={() => p.phone && callPhone(p.phone)} />
         <Action c={c} icon="K" label="카카오맵" onPress={() => openKakaoMap(p)} />
       </View>
@@ -149,6 +170,9 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
         </ScrollView>
       ) : null}
       {detail?.photoSource === "naver" && <Text style={[styles.caption, { color: c.muted }]}>사진: 네이버 이미지 검색 결과</Text>}
+
+      {/* 내 평가: 별점 + 메모 (기기에 저장) */}
+      <MyReview place={p} colors={c} />
 
       {/* 추천 이유 */}
       <View style={[styles.reasonBox, { backgroundColor: c.accentSoft }]}>
@@ -363,6 +387,14 @@ const styles = StyleSheet.create({
   photo: { width: 120, height: 160, borderRadius: 10 },
   photoSkeleton: { height: 160, marginHorizontal: 16, marginTop: 12, borderRadius: 10 },
   caption: { fontSize: 11, paddingHorizontal: 16, marginTop: 4 },
+  myPhotos: { gap: 8, paddingTop: 8 },
+  myPhoto: { width: 72, height: 72, borderRadius: 8 },
+  myPhotoDel: { position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
+  myPhotoAdd: { width: 72, height: 72, borderRadius: 8, borderWidth: 1, borderStyle: "dashed", alignItems: "center", justifyContent: "center" },
+  myBox: { marginHorizontal: 16, marginTop: 14, borderRadius: 12, borderWidth: 1, padding: 12 },
+  stars: { flexDirection: "row", alignItems: "center", gap: 2, marginTop: 6 },
+  memo: { borderWidth: 1, borderRadius: 10, padding: 10, minHeight: 64, fontSize: 14, textAlignVertical: "top", marginTop: 8 },
+  memoBtn: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   reasonBox: { marginHorizontal: 16, marginTop: 14, borderRadius: 12, padding: 12 },
   tags: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
   tag: { fontSize: 12, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, overflow: "hidden" },
@@ -383,3 +415,126 @@ const styles = StyleSheet.create({
   more: { borderWidth: 1, borderRadius: 10, paddingVertical: 11, alignItems: "center", marginTop: 12 },
   foot: { fontSize: 11, textAlign: "center", marginTop: 24, paddingHorizontal: 24, lineHeight: 17 },
 });
+
+/** 내 별점(1~5)과 메모. 같은 별을 다시 누르면 별점 지우기 */
+function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors }) {
+  const notes = useMyNotes();
+  const mine = notes.get(p.id);
+  const [memo, setMemo] = useState(mine?.memo ?? "");
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  useEffect(() => {
+    setMemo(notes.get(p.id)?.memo ?? "");
+    setSavedAt(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.id]);
+  const dirty = memo !== (mine?.memo ?? "");
+  const photos = mine?.photos ?? [];
+  const [viewer, setViewer] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const addPhotos = (from: "library" | "camera") => async () => {
+    const remaining = MAX_MY_PHOTOS - photos.length;
+    if (remaining <= 0) return;
+    setAdding(true);
+    try {
+      const added = from === "library" ? await pickFromLibrary(p.id, remaining) : await takePhoto(p.id);
+      if (added.length) notes.save(p.id, p.name, { photos: [...(notes.get(p.id)?.photos ?? []), ...added].slice(0, MAX_MY_PHOTOS) });
+    } catch (e) {
+      Alert.alert("사진을 추가하지 못했어요", e instanceof Error ? e.message : "");
+    } finally {
+      setAdding(false);
+    }
+  };
+  const askAdd = () =>
+    // 웹(미리보기)에서는 선택 버튼이 있는 알림창이 없어 바로 앨범을 연다
+    Platform.OS === "web"
+      ? addPhotos("library")()
+      : Alert.alert("사진 추가", `최대 ${MAX_MY_PHOTOS}장 (지금 ${photos.length}장)`, [
+      { text: "앨범에서 고르기", onPress: addPhotos("library") },
+      { text: "사진 찍기", onPress: addPhotos("camera") },
+      { text: "취소", style: "cancel" },
+    ]);
+  const removePhoto = (uri: string) =>
+    Alert.alert("사진 삭제", "이 사진을 내 평가에서 지울까요?", [
+      { text: "취소", style: "cancel" },
+      {
+        text: "삭제",
+        style: "destructive",
+        onPress: () => {
+          notes.save(p.id, p.name, { photos: photos.filter((u) => u !== uri) });
+          deletePhotoFile(uri);
+        },
+      },
+    ]);
+
+  return (
+    <View style={[styles.myBox, { borderColor: c.line, backgroundColor: c.surface }]}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text style={{ fontSize: 14, fontWeight: "800", color: c.text }}>내 평가</Text>
+        {mine?.updatedAt ? (
+          <Text style={{ fontSize: 11, color: c.muted }}>{new Date(mine.updatedAt).toLocaleDateString("ko-KR")}</Text>
+        ) : null}
+      </View>
+      <View style={styles.stars}>
+        {[1, 2, 3, 4, 5].map((n) => {
+          const on = (mine?.rating ?? 0) >= n;
+          return (
+            <Pressable
+              key={n}
+              onPress={() => notes.save(p.id, p.name, { rating: mine?.rating === n ? null : n })}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`내 별점 ${n}점`}
+            >
+              <Text style={{ fontSize: 30, color: on ? "#F5A400" : c.line }}>★</Text>
+            </Pressable>
+          );
+        })}
+        {mine?.rating ? <Text style={{ marginLeft: 8, color: c.muted, fontSize: 13 }}>{mine.rating}점</Text> : null}
+      </View>
+      {/* 내 사진 (여러 장) */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.myPhotos} keyboardShouldPersistTaps="handled">
+        {photos.map((u, i) => (
+          <View key={u}>
+            <Pressable onPress={() => setViewer(i)} accessibilityLabel={`내 사진 ${i + 1} 크게 보기`}>
+              <Image source={{ uri: u }} style={[styles.myPhoto, { backgroundColor: c.surface2 }]} contentFit="cover" />
+            </Pressable>
+            <Pressable onPress={() => removePhoto(u)} style={styles.myPhotoDel} hitSlop={8} accessibilityLabel="사진 삭제">
+              <Text style={{ color: "#fff", fontSize: 11, fontWeight: "800" }}>✕</Text>
+            </Pressable>
+          </View>
+        ))}
+        {photos.length < MAX_MY_PHOTOS && (
+          <Pressable onPress={askAdd} disabled={adding} style={[styles.myPhotoAdd, { borderColor: c.line }]} accessibilityRole="button" accessibilityLabel="사진 추가">
+            {adding ? <ActivityIndicator color={c.accent} /> : <Text style={{ fontSize: 22, color: c.muted }}>＋</Text>}
+            <Text style={{ fontSize: 11, color: c.muted }}>사진 {photos.length}/{MAX_MY_PHOTOS}</Text>
+          </Pressable>
+        )}
+      </ScrollView>
+      <PhotoViewer photos={viewer !== null ? photos : null} index={viewer ?? 0} onClose={() => setViewer(null)} />
+      <TextInput
+        value={memo}
+        onChangeText={setMemo}
+        placeholder="메모 (예: 순대국 진함, 점심엔 웨이팅 10분)"
+        placeholderTextColor={c.muted}
+        multiline
+        maxLength={500}
+        style={[styles.memo, { color: c.text, borderColor: c.line, backgroundColor: c.bg }]}
+      />
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 12, marginTop: 8 }}>
+        {savedAt && !dirty ? <Text style={{ fontSize: 12, color: c.naver }}>저장됨</Text> : null}
+        <Pressable
+          onPress={() => {
+            notes.save(p.id, p.name, { memo: memo.trim() });
+            setSavedAt(Date.now());
+          }}
+          disabled={!dirty}
+          style={[styles.memoBtn, { backgroundColor: dirty ? c.accent : c.surface2 }]}
+          accessibilityRole="button"
+        >
+          <Text style={{ color: dirty ? "#fff" : c.muted, fontWeight: "700", fontSize: 13 }}>메모 저장</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}

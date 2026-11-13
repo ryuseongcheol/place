@@ -3,6 +3,7 @@ import { planFor, requestBudget } from "./budget";
 import { classify, type Attrs } from "./classify";
 import { fetchKakaoRaw, parseKakaoDetail, regionName, searchKakao } from "./kakao";
 import { extractKakaoReviews, extractMenus, extractOpenHours } from "./kakaoDetail";
+import { dedupeBranches } from "./placeName";
 import { detectShows } from "./shows";
 import { mockKakao, mockNaver, mockPlaces } from "./mock";
 import { attachNaver } from "./naver";
@@ -155,6 +156,8 @@ export async function recommend(req: RecommendRequest, opts: { skipAi?: boolean 
     shows: showsMap.get(p.id) ?? [],
   }));
   scored.sort((a, b) => b.score - a.score);
+  // 같은 이름(체인) 여러 지점은 점수 높은 한 곳만 (나머지는 "다른 지점 N곳"으로)
+  scored = dedupeBranches(scored);
 
   // 5) AI 재정렬 + 추천 이유. 빠른 모드면 건너뛰고, 앱이 /api/recommend/rerank 로 따로 요청한다
   const aiPending = aiEnabled() && Boolean(opts.skipAi);

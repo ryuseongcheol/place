@@ -1,4 +1,5 @@
 import { formatDate, normalizeImageUrl, stripTags } from "./kakaoDetail";
+import { postMentionsPlace, sameBranch } from "./placeName";
 import { detectShowsInPosts } from "./shows";
 import type { Budget } from "./budget";
 import type { BasePlace, BlogReview, LatLng, NaverReviewInfo } from "./types";
@@ -158,10 +159,11 @@ function naverPlaceUrl(place: BasePlace, naverId: string | null) {
 export function matchNaver(place: BasePlace, candidates: NaverCandidate[]): NaverReviewInfo | null {
   let best: { c: NaverCandidate; score: number } | null = null;
   for (const c of candidates) {
+    // 근처 다른 지점에 잘못 붙지 않게: 100m 안(이름이 거의 같으면 150m), 이름 유사도 0.7 이상, 지점명이 다르면 제외
     const dist = haversine(place, c);
-    if (dist > 150) continue;
     const sim = nameSimilarity(place.name, c.name);
-    if (sim < 0.6) continue;
+    if (dist > (sim >= 0.95 ? 150 : 100)) continue;
+    if (sim < 0.7 || !sameBranch(place.name, c.name)) continue;
     const score = sim - dist / 1000;
     if (!best || score > best.score) best = { c, score };
   }
@@ -239,10 +241,6 @@ const blogCache = new TTLCache<{ items: BlogReview[]; total: number } | null>(6 
 const imageCache = new TTLCache<string[] | null>(6 * 60 * 60 * 1000, 500);
 
 
-/** 가게 이름의 핵심 부분 (지점명/공백 제거) — 블로그 글이 정말 이 가게 얘기인지 거르는 데 쓴다 */
-function coreName(name: string) {
-  return normalizeName(name.replace(/\s*\S+점$/, ""));
-}
 
 /**
  * [공식] 네이버 블로그 검색. "동네 + 가게명"으로 검색하고, 제목/본문에 가게명이 들어간 글만 남긴다.
@@ -264,12 +262,8 @@ export async function naverBlogSearch(name: string, region: string | null, budge
       items: Array<{ title: string; link: string; description: string; bloggername: string; postdate: string }>;
     };
     // 블로그 글이 이 가게 얘기인지: 전체 이름 또는 첫 단어(2글자 이상)가 제목/본문에 있어야 한다
-    const core = coreName(name);
-    const firstWord = normalizeName(name.split(/\s+/)[0] ?? "");
-    const mentions = (text: string) => {
-      const t = normalizeName(text);
-      return !core || t.includes(core) || (firstWord.length >= 2 && t.includes(firstWord));
-    };
+    // 이 가게(지점) 얘기인 글만: 지점이 있으면 지점명이나 동네도 함께 언급돼야 한다
+    const mentions = (text: string) => postMentionsPlace(text, name, dong);
     const items = data.items
       .map(
         (it): BlogReview => ({
@@ -351,6 +345,7 @@ export async function naverShowSearch(name: string, region: string | null, budge
     const shows = detectShowsInPosts(
       data.items.map((it) => ({ title: stripTags(it.title), snippet: stripTags(it.description) })),
       name,
+      dong,
     );
     showCache.set(query, shows);
     return shows;

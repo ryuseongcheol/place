@@ -71,7 +71,7 @@ export async function getPlaceDetail(req: DetailRequest): Promise<PlaceDetail> {
     // 방송·가이드 출연: 카카오 상세 + 블로그(가게 이름과 함께 언급된 글)
     shows: mergeShows(
       raw ? detectShows([JSON.stringify(raw)]) : [],
-      detectShowsInPosts(blog?.items.map((b) => ({ title: b.title, snippet: b.snippet })) ?? [], req.name),
+      detectShowsInPosts(blog?.items.map((b) => ({ title: b.title, snippet: b.snippet })) ?? [], req.name, region?.split(" ").pop()),
       showPosts,
     ),
     sources: {

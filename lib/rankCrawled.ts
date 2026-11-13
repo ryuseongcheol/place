@@ -1,4 +1,5 @@
 import { ATTR_LABELS, attrFit, topReasons, type AttrKey, type Attrs } from "./classify";
+import { dedupeBranches } from "./placeName";
 import { showLabel } from "./shows";
 import { THEME_PRESETS, type ThemePreset } from "./themes";
 import type { CrawledPlace, ScoredPlace } from "./types";
@@ -11,6 +12,17 @@ import { haversine, normalizeName } from "./util";
  */
 
 const RESULT_LIMIT = 30;
+
+/** 정렬된 목록에서 같은 브랜드(체인) 지점 묶기: 남길 식당 id → 숨긴 다른 지점 수 */
+const branchCache = new WeakMap<object, Map<string, number>>();
+function branchCounts(arr: Array<{ p: CrawledPlace }>): Map<string, number> {
+  let m = branchCache.get(arr);
+  if (!m) {
+    m = new Map(dedupeBranches(arr.map((x) => x.p)).map((p) => [p.id, p.otherBranches ?? 0]));
+    branchCache.set(arr, m);
+  }
+  return m;
+}
 
 function bayes(r: number | null, n: number) {
   if (r === null) return null;
@@ -71,6 +83,10 @@ export function rankByTheme(places: CrawledPlace[], theme: ThemePreset, me: { la
     })
     .filter((x) => x.fit >= 25)
     .sort((a, b) => b.score - a.score)
+    .flatMap((x, _i, arr) => {
+      const c = branchCounts(arr);
+      return c.has(x.p.id) ? [{ ...x, p: { ...x.p, otherBranches: c.get(x.p.id) || undefined } }] : [];
+    })
     .slice(0, RESULT_LIMIT)
     .map(({ p, fit, score }) => {
       const why = topReasons(p.attrs as Attrs, theme.attrs);
@@ -123,6 +139,10 @@ export function rankByText(places: CrawledPlace[], text: string, me: { lat: numb
     })
     .filter((x) => x.match > 0 || x.rel >= 35)
     .sort((a, b) => b.score - a.score)
+    .flatMap((x, _i, arr) => {
+      const c = branchCounts(arr);
+      return c.has(x.p.id) ? [{ ...x, p: { ...x.p, otherBranches: c.get(x.p.id) || undefined } }] : [];
+    })
     .slice(0, RESULT_LIMIT)
     .map(({ p, rel, score, match }) => {
       const reason = match > 0 ? `'${text}'와(과) 관련된 곳이에요.${ratingText(p)}` : `'${text}'에 어울리는 성격의 곳이에요.${ratingText(p)}`;

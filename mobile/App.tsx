@@ -7,6 +7,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import { fetchRecommendations, fetchThemes, rerankRecommendations, searchDb } from "./src/api";
 import BottomSheet, { type BottomSheetRef, type SheetSnap } from "./src/BottomSheet";
 import { FavoritesProvider, colorHex, useFavorites, type FavGroup } from "./src/favorites";
+import { MyNotesProvider, useMyNotes } from "./src/myNotes";
 import { FavGroupsHeader, FavGroupsList } from "./src/FavoritesView";
 import { rankByText, rankByTheme } from "./src/localRank";
 import { PlaceBody, PlaceHeader } from "./src/PlaceDetailView";
@@ -53,11 +54,13 @@ const reviewVolume = (p: ScoredPlace) =>
 export default function App() {
   return (
     <SafeAreaProvider>
+      <MyNotesProvider>
       <FavoritesProvider>
         <RegionsProvider>
           <MapScreen />
         </RegionsProvider>
       </FavoritesProvider>
+      </MyNotesProvider>
     </SafeAreaProvider>
   );
 }
@@ -69,6 +72,7 @@ function MapScreen() {
   const { loc, locate } = useLocation();
   const fav = useFavorites();
   const rg = useRegions();
+  const notes = useMyNotes();
   // 지도 마커 픽토그램 글꼴 (마커는 비트맵으로 그려지므로 미리 불러둔다)
   const [iconsReady] = useFonts(MaterialCommunityIcons.font);
 
@@ -125,7 +129,11 @@ function MapScreen() {
   // 정렬: 목록과 지도 번호가 같은 순서를 쓴다
   const sortPlaces = useCallback(
     (list: ScoredPlace[]) => {
-      if (sortMode === "recommend") return list;
+      // 추천순: 내가 2점 이하로 준 곳은 아래로
+      if (sortMode === "recommend") {
+        const low = (p: ScoredPlace) => ((notes.get(p.id)?.rating ?? 3) <= 2 ? 1 : 0);
+        return [...list].sort((a, b) => low(a) - low(b));
+      }
       const arr = [...list];
       if (sortMode === "rating")
         arr.sort((a, b) => {
@@ -138,7 +146,7 @@ function MapScreen() {
       else if (sortMode === "reviews") arr.sort((a, b) => reviewVolume(b) - reviewVolume(a));
       return arr;
     },
-    [sortMode, distanceOf],
+    [sortMode, distanceOf, notes],
   );
   const resultPlaces = useMemo(() => sortPlaces(results?.places ?? []), [results, sortPlaces]);
   const mapPlaces = layer === "favorites" ? sortPlaces(fav.placesIn(favGroupId)) : resultPlaces;

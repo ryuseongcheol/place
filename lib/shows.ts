@@ -1,6 +1,6 @@
 import type { Attrs } from "./classify";
 import type { CrawledPlace } from "./types";
-import { normalizeName } from "./util";
+import { postMentionsPlace } from "./placeName";
 
 /**
  * 유명 맛집 방송·유튜브·가이드 출연 여부.
@@ -42,15 +42,12 @@ export function detectShows(texts: Array<string | null | undefined>): string[] {
   return SHOWS.filter((s) => s.aliases.some((a) => t.includes(squash(a)))).map((s) => s.id);
 }
 
-/** 블로그 글에서 찾기: 같은 글에 가게 이름과 프로그램 이름이 함께 있어야 인정 */
-export function detectShowsInPosts(posts: Array<{ title: string; snippet: string }>, placeName: string): string[] {
-  const core = normalizeName(placeName.replace(/\s*\S+점$/, ""));
-  const first = normalizeName(placeName.split(/\s+/)[0] ?? "");
+/** 블로그 글에서 찾기: 같은 글에 이 가게(지점) 이름과 프로그램 이름이 함께 있어야 인정 */
+export function detectShowsInPosts(posts: Array<{ title: string; snippet: string }>, placeName: string, dong?: string | null): string[] {
   const found = new Set<string>();
   for (const p of posts) {
     const text = `${p.title} ${p.snippet}`;
-    const n = normalizeName(text);
-    if (!(core && n.includes(core)) && !(first.length >= 2 && n.includes(first))) continue;
+    if (!postMentionsPlace(text, placeName, dong)) continue;
     for (const id of detectShows([text])) found.add(id);
   }
   return [...found];
