@@ -15,7 +15,7 @@ import { ListHeader, PlaceList } from "./src/PlaceList";
 import PlacesMap, { type PlacesMapRef } from "./src/PlacesMap";
 import { checkLatestRelease } from "./src/appVersion";
 import { registerBackgroundCrawl } from "./src/backgroundCrawl";
-import { syncPayments } from "./src/payments";
+import { rememberLocation, syncPayments } from "./src/payments";
 import { snapToScored } from "./src/placeSnap";
 import TimelineScreen from "./src/TimelineScreen";
 import { RegionsProvider, useRegions } from "./src/regions";
@@ -131,6 +131,10 @@ function MapScreen() {
   // 결제 알림 가져오기: 앱을 켤 때, 다시 앞으로 올 때
   const meRef = useRef(me);
   meRef.current = loc.status === "ok" ? me : null;
+  // 결제 위치가 없는 기록을 맞출 때 기준점으로 쓴다
+  useEffect(() => {
+    if (loc.status === "ok") rememberLocation(loc.lat, loc.lng);
+  }, [loc]);
   useEffect(() => {
     const run = () => syncPayments({ fallbackLoc: meRef.current, scan: true }).catch(() => {});
     const t = setTimeout(run, 1500);

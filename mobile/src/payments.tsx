@@ -1,9 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
 import { ackPayments, getPendingPayments, scanActiveNotifications, type RawPaymentNotification } from "../modules/payment-notifications";
-import { matchMerchants } from "./api";
+import { matchMerchants, type PlaceCandidate } from "./api";
+import { loadRegions } from "./crawlEngine";
 import { snapOf, type PlaceSnap } from "./placeSnap";
-import { nameSimilarity, parsePaymentNotification } from "./shared";
+import { haversine, nameSimilarity, parsePaymentNotification } from "./shared";
 
 /**
  * 결제 기록 (내 타임라인의 "방문").
@@ -37,9 +38,49 @@ export interface PaymentRecord {
   /** 알림 원문 (확인용, 기기 안에만) */
   raw?: string;
   tries?: number;
+  /** 같은 이름 지점이 여러 곳이라 맞는지 확인이 필요 */
+  needsCheck?: boolean;
+  /** 내가 장소를 직접 고르거나 확인함 (자동 매칭이 덮어쓰지 않음) */
+  userFixed?: boolean;
+  /** 서버가 찾은 후보 장소 (장소 바꾸기에서 보여줌) */
+  candidates?: Array<PlaceSnap & { distance: number | null }>;
 }
 
 const KEY = "payments:v1";
+const ALIAS_KEY = "payments:aliases:v1";
+const REMATCH_FLAG = "payments:rematch:v2";
+const LAST_LOC_KEY = "payments:lastloc:v1";
+
+/** 가맹점 이름 → 내가 고른 장소 (다음 결제부터 바로 그 장소로) */
+type Aliases = Record<string, PlaceSnap>;
+const merchantKey = (m: string) => m.replace(/\(주\)|㈜|주식회사/g, "").replace(/[\s_\-·.]/g, "").toLowerCase();
+
+async function loadAliases(): Promise<Aliases> {
+  try {
+    const v = await AsyncStorage.getItem(ALIAS_KEY);
+    return v ? (JSON.parse(v) as Aliases) : {};
+  } catch {
+    return {};
+  }
+}
+async function saveAlias(merchant: string, place: PlaceSnap) {
+  const a = await loadAliases();
+  a[merchantKey(merchant)] = place;
+  await AsyncStorage.setItem(ALIAS_KEY, JSON.stringify(a)).catch(() => {});
+}
+
+/** 앱이 마지막으로 안 내 위치 (결제 위치가 없을 때 기준점으로) */
+export function rememberLocation(lat: number, lng: number) {
+  AsyncStorage.setItem(LAST_LOC_KEY, JSON.stringify({ lat, lng, at: Date.now() })).catch(() => {});
+}
+async function lastLocation(): Promise<{ lat: number; lng: number; at: number } | null> {
+  try {
+    const v = await AsyncStorage.getItem(LAST_LOC_KEY);
+    return v ? JSON.parse(v) : null;
+  } catch {
+    return null;
+  }
+}
 const IGNORED_KEY = "payments:ignored:v1";
 
 /** 결제 알림처럼 보였지만 해석하지 못한 알림 (문구 형식 확인용, 최근 30건) */
@@ -200,16 +241,56 @@ function ingest(list: PaymentRecord[], raws: RawPaymentNotification[], fallback?
   return { added, merged, ignored };
 }
 
-/** 가맹점 → 가게 맞추기 (아직 못 맞춘 것만, 한 번에 최대 40건) */
+const toSnap = (c: PlaceCandidate) => ({ ...snapOf(c), distance: c.distance });
+
+/**
+ * 결제 위치가 없을 때 기준점: 같은 날 앞뒤 4시간 안에 위치가 잡힌 다른 결제 → 마지막 내 위치 → 설정한 동네
+ */
+function anchorsFor(x: PaymentRecord, list: PaymentRecord[], extra: Array<{ lat: number; lng: number }>) {
+  const near = list
+    .filter((o) => o !== x && o.lat != null && o.lng != null && Math.abs(o.at - x.at) < 4 * 60 * MIN)
+    .sort((a, b) => Math.abs(a.at - x.at) - Math.abs(b.at - x.at))
+    .slice(0, 1)
+    .map((o) => ({ lat: o.lat!, lng: o.lng! }));
+  const out = [...near];
+  for (const e of extra) if (out.length < 3 && !out.some((a) => haversine(a, e) < 2000)) out.push(e);
+  return out;
+}
+
+/** 가맹점 → 가게 맞추기 (아직 못 맞춘 것만, 한 번에 최대 36건) */
 async function matchPending(list: PaymentRecord[]): Promise<{ matched: number; error: string | null }> {
-  const todo = list.filter((x) => x.status === "pending" && x.merchant && (x.tries ?? 0) < 3).slice(0, 40);
   let matched = 0;
   let error: string | null = null;
-  for (let i = 0; i < todo.length; i += 20) {
-    const batch = todo.slice(i, i + 20);
+  // 1) 내가 예전에 고른 장소가 있는 가맹점은 바로
+  const aliases = await loadAliases();
+  for (const x of list) {
+    if (x.status !== "pending" || !x.merchant) continue;
+    const a = aliases[merchantKey(x.merchant)];
+    if (!a) continue;
+    if (x.lat != null && x.lng != null && haversine({ lat: x.lat, lng: x.lng }, a) > 30000) continue; // 다른 지역이면 무시
+    Object.assign(x, { status: "matched", place: a, needsCheck: false, userFixed: true });
+    matched++;
+  }
+  // 2) 서버
+  const todo = list.filter((x) => x.status === "pending" && x.merchant && (x.tries ?? 0) < 3).slice(0, 36);
+  if (!todo.length) return { matched, error };
+  const extra: Array<{ lat: number; lng: number }> = [];
+  const last = await lastLocation();
+  if (last) extra.push({ lat: last.lat, lng: last.lng });
+  for (const r of await loadRegions().catch(() => [])) extra.push({ lat: r.lat, lng: r.lng });
+  for (let i = 0; i < todo.length; i += 12) {
+    const batch = todo.slice(i, i + 12);
     let res;
     try {
-      res = await matchMerchants(batch.map((x) => ({ id: x.id, merchant: x.merchant!, lat: x.lat ?? null, lng: x.lng ?? null })));
+      res = await matchMerchants(
+        batch.map((x) => ({
+          id: x.id,
+          merchant: x.merchant!,
+          lat: x.lat ?? null,
+          lng: x.lng ?? null,
+          anchors: x.lat == null ? anchorsFor(x, list, extra) : undefined,
+        })),
+      );
     } catch (e) {
       error = e instanceof Error ? e.message : "서버 연결 실패";
       break; // 다음에 다시
@@ -219,15 +300,17 @@ async function matchPending(list: PaymentRecord[]): Promise<{ matched: number; e
       const r = byId.get(x.id);
       if (!r) continue; // 서버 예산이 모자라 못 한 것: 다음에
       x.tries = (x.tries ?? 0) + 1;
+      x.candidates = (r.candidates ?? []).slice(0, 6).map(toSnap);
       if (r.status === "matched") {
         x.status = "matched";
         x.place = snapOf(r.place);
+        x.needsCheck = !!r.ambiguous;
         matched++;
       } else if (r.status === "notFood") {
         x.status = "notFood";
         x.reason = r.reason;
         x.place = r.place ? snapOf(r.place) : undefined;
-      } else if (x.tries >= 1) {
+      } else {
         x.status = "unmatched";
       }
     }
@@ -248,6 +331,13 @@ export function syncPayments(opts: { fallbackLoc?: { lat: number; lng: number } 
     lastSync = Date.now();
     const scan = opts.scan ? scanActiveNotifications() : null;
     const list = [...(await load())].map((r) => ({ ...r }));
+    // 1.5.0: 결제 위치 없이 이름만으로 맞췄던 기록은 새 방식(기준점·후보·확인 필요)으로 다시 맞춘다 (한 번만)
+    if (!(await AsyncStorage.getItem(REMATCH_FLAG).catch(() => null))) {
+      for (const x of list) {
+        if (x.status === "matched" && !x.userFixed && !x.manual && x.lat == null && !x.candidates) Object.assign(x, { status: "pending", tries: 0 });
+      }
+      await AsyncStorage.setItem(REMATCH_FLAG, "1").catch(() => {});
+    }
     const raws = getPendingPayments();
     const { added, merged, ignored } = ingest(list, raws, opts.fallbackLoc);
     // 먼저 저장하고 나서 네이티브 쪽을 비운다 (중간에 꺼져도 잃지 않게)
@@ -299,6 +389,45 @@ export function updatePayment(id: string, patch: Partial<PaymentRecord>) {
 
 export function removePayment(id: string) {
   return mutate((list) => list.filter((r) => r.id !== id));
+}
+
+/**
+ * 결제 기록의 장소를 내가 고른 곳으로. 같은 가맹점 이름의 다른 결제(직접 고치지 않은 것, 30km 안)도 같이 바꾸고,
+ * 다음 결제부터도 그 장소로 기록한다. 같이 바뀐 건수를 돌려준다
+ */
+export async function setPaymentPlace(id: string, place: PlaceSnap): Promise<number> {
+  let others = 0;
+  let merchant: string | null = null;
+  await mutate((list) => {
+    const x = list.find((r) => r.id === id);
+    if (!x) return;
+    merchant = x.merchant;
+    Object.assign(x, { place, status: "matched", needsCheck: false, userFixed: true, hidden: false, reason: undefined });
+    if (!x.merchant) return;
+    const k = merchantKey(x.merchant);
+    for (const o of list) {
+      if (o === x || o.userFixed || o.manual || !o.merchant || merchantKey(o.merchant) !== k) continue;
+      if (o.lat != null && o.lng != null && haversine({ lat: o.lat, lng: o.lng }, place) > 30000) continue;
+      Object.assign(o, { place, status: "matched", needsCheck: false, userFixed: true, hidden: false, reason: undefined });
+      others++;
+    }
+  });
+  if (merchant) await saveAlias(merchant, place);
+  return others;
+}
+
+/** 자동으로 찾은 장소가 맞다고 확인 */
+export async function confirmPaymentPlace(id: string) {
+  const saved: { merchant?: string; place?: PlaceSnap } = {};
+  await mutate((list) => {
+    const x = list.find((r) => r.id === id);
+    if (!x) return;
+    x.needsCheck = false;
+    x.userFixed = true;
+    saved.merchant = x.merchant ?? undefined;
+    saved.place = x.place;
+  });
+  if (saved.merchant && saved.place) await saveAlias(saved.merchant, saved.place);
 }
 
 /** 가맹점 이름을 고쳐서 다시 찾기 */

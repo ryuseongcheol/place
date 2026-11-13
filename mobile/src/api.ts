@@ -151,11 +151,14 @@ export interface MerchantMatchItem {
   merchant: string;
   lat?: number | null;
   lng?: number | null;
+  /** 결제 위치가 없을 때 기준점 (최대 3) */
+  anchors?: Array<{ lat: number; lng: number }>;
 }
+export type PlaceCandidate = import("./placeSnap").PlaceSnap & { categoryGroup?: string; distance: number | null; score: number };
 export type MerchantMatchResult =
-  | { status: "matched"; place: import("./placeSnap").PlaceSnap & { categoryGroup?: string }; confidence: number }
-  | { status: "notFood"; reason: string; place?: import("./placeSnap").PlaceSnap }
-  | { status: "unmatched" };
+  | { status: "matched"; place: PlaceCandidate; confidence: number; ambiguous?: boolean; candidates?: PlaceCandidate[] }
+  | { status: "notFood"; reason: string; place?: PlaceCandidate; candidates?: PlaceCandidate[] }
+  | { status: "unmatched"; candidates?: PlaceCandidate[] };
 
 /** 결제 알림 가맹점 이름 → 카카오 장소 (한 번에 최대 20곳 처리, 남은 건 다음에) */
 export function matchMerchants(items: MerchantMatchItem[]) {
@@ -163,5 +166,14 @@ export function matchMerchants(items: MerchantMatchItem[]) {
     "/api/match/merchants",
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) },
     30000,
+  );
+}
+
+/** 가게 이름으로 장소 찾기 (위치가 있으면 가까운 순) */
+export function searchPlacesByName(q: string, loc: { lat: number; lng: number } | null) {
+  return request<{ places: PlaceCandidate[] }>(
+    "/api/match/search",
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, lat: loc?.lat ?? null, lng: loc?.lng ?? null }) },
+    15000,
   );
 }

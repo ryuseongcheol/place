@@ -19,11 +19,24 @@ export interface MatchedPlace {
   kakaoUrl: string;
 }
 
+/** 후보 장소 (거리: 결제 위치 또는 기준점에서) */
+export interface Candidate extends MatchedPlace {
+  distance: number | null;
+  score: number;
+}
+
 export type MerchantMatch =
-  | { status: "matched"; place: MatchedPlace; confidence: number }
+  | {
+      status: "matched";
+      place: MatchedPlace;
+      confidence: number;
+      /** 같은 이름 지점이 여러 곳이라 사용자가 확인해야 함 */
+      ambiguous?: boolean;
+      candidates?: Candidate[];
+    }
   /** 음식점·카페가 아닌 곳 (편의점·마트·온라인·배달 등) */
-  | { status: "notFood"; reason: string; place?: MatchedPlace }
-  | { status: "unmatched" };
+  | { status: "notFood"; reason: string; place?: MatchedPlace; candidates?: Candidate[] }
+  | { status: "unmatched"; candidates?: Candidate[] };
 
 const ORG = /\(주\)|㈜|주식회사|\(유\)|유한회사|\(사\)|\(재\)/g;
 const PG_PREFIX = /^(KCP|NHN\s*KCP|KG\s*이니시스|이니시스|INICIS|토스페이먼츠|토스페이|나이스페이(먼츠)?|NICE|다날|스마트로|KICC|한국정보통신|KSNET|KIS|페이레터|헥토|네이버페이|카카오페이|페이코|PAYCO|N페이|SPC)\s*[-_:·)\]]*\s*/i;
@@ -67,11 +80,11 @@ const toPlace = (d: KakaoDoc): MatchedPlace => ({
   kakaoUrl: d.place_url,
 });
 
-async function keyword(query: string, loc: LatLng | null, radius: number, budget: Budget): Promise<KakaoDoc[]> {
+async function keyword(query: string, loc: LatLng | null, radius: number, budget: Budget, sort: "accuracy" | "distance" = "accuracy"): Promise<KakaoDoc[]> {
   const key = process.env.KAKAO_REST_API_KEY;
   if (!key) throw new Error("KAKAO_REST_API_KEY가 설정되지 않았습니다.");
   if (!budget.take()) return [];
-  const params = new URLSearchParams({ query, size: "15", sort: "accuracy" });
+  const params = new URLSearchParams({ query, size: "15", sort: loc ? sort : "accuracy" });
   if (loc) {
     params.set("x", String(loc.lng));
     params.set("y", String(loc.lat));
@@ -94,51 +107,92 @@ function nameScore(merchant: string, place: string): number {
   return nameSimilarity(merchant, place);
 }
 
-function pick(docs: KakaoDoc[], merchant: string, loc: LatLng | null): { doc: KakaoDoc; score: number } | null {
-  let best: { doc: KakaoDoc; score: number } | null = null;
+const isFood = (d: KakaoDoc) =>
+  d.category_group_code === "FD6" || d.category_group_code === "CE7" || (/음식|카페|베이커리|제과|디저트/.test(d.category_name) && !NOT_FOOD_CATEGORY.test(d.category_name));
+
+/**
+ * 후보 점수: 이름 유사도 + 가까움.
+ * 결제 순간 위치(loc)가 있으면 그 거리를 강하게, 없으면 기준점(같은 날 다른 결제 위치·내 위치·설정한 동네) 거리를 약하게 반영
+ */
+function rank(docs: KakaoDoc[], merchant: string, loc: LatLng | null, anchors: LatLng[], alt: string | null = null): Candidate[] {
+  const out: Candidate[] = [];
+  const seen = new Set<string>();
   for (const d of docs) {
-    const sim = nameScore(merchant, d.place_name);
+    if (seen.has(d.id)) continue;
+    seen.add(d.id);
+    // 법인명이 앞에 붙은 이름은 마지막 단어로도 비교 (조금 낮게)
+    const sim = Math.max(nameScore(merchant, d.place_name), alt ? nameScore(alt, d.place_name) * 0.95 : 0);
     if (sim < 0.5) continue;
-    const dist = loc ? haversine(loc, { lat: Number(d.y), lng: Number(d.x) }) : null;
-    // 가까울수록 가산 (300m 안이면 거의 확실)
-    const near = dist == null ? 0 : dist < 300 ? 0.2 : dist < 1000 ? 0.12 : dist < 3000 ? 0.05 : 0;
-    const food = d.category_group_code === "FD6" || d.category_group_code === "CE7" ? 0.05 : 0;
-    const score = sim + near + food;
-    if (!best || score > best.score) best = { doc: d, score };
+    const pos = { lat: Number(d.y), lng: Number(d.x) };
+    let distance: number | null = null;
+    let near = 0;
+    if (loc) {
+      distance = haversine(loc, pos);
+      near = distance < 300 ? 0.3 : distance < 1000 ? 0.2 : distance < 3000 ? 0.1 : distance < 10000 ? 0.03 : -0.1;
+    } else if (anchors.length) {
+      distance = Math.min(...anchors.map((a) => haversine(a, pos)));
+      near = distance < 1000 ? 0.15 : distance < 3000 ? 0.1 : distance < 10000 ? 0.05 : 0;
+    }
+    const score = sim + near + (isFood(d) ? 0.05 : 0);
+    out.push({ ...toPlace(d), distance: distance == null ? null : Math.round(distance), score: Math.round(score * 1000) / 1000 });
   }
-  return best;
+  return out.sort((a, b) => b.score - a.score);
 }
 
-export async function matchMerchant(rawMerchant: string, loc: LatLng | null, budget: Budget): Promise<MerchantMatch> {
+export async function matchMerchant(rawMerchant: string, loc: LatLng | null, budget: Budget, anchors: LatLng[] = []): Promise<MerchantMatch> {
   const merchant = cleanMerchantName(rawMerchant);
   if (!merchant || merchant.length < 2) return { status: "unmatched" };
   if (ONLINE.test(merchant.replace(/\s+/g, ""))) return { status: "notFood", reason: "배달·온라인·교통" };
 
-  // 1) 결제 위치 근처 → 2) 넓게 → 3) 이름만 (위치 없을 때)
-  const tries: Array<{ q: string; loc: LatLng | null; radius: number }> = loc
-    ? [
-        { q: merchant, loc, radius: 2000 },
-        { q: merchant, loc, radius: 20000 },
-      ]
-    : [{ q: merchant, loc: null, radius: 0 }];
+  // 검색 순서: 결제 위치 근처 → 넓게 / 위치가 없으면 기준점 근처 → 이름만(전국)
+  const tries: Array<{ q: string; loc: LatLng | null; radius: number }> = [];
+  if (loc) tries.push({ q: merchant, loc, radius: 2000 }, { q: merchant, loc, radius: 20000 });
+  else {
+    for (const a of anchors.slice(0, 3)) tries.push({ q: merchant, loc: a, radius: 8000 });
+    tries.push({ q: merchant, loc: null, radius: 0 });
+  }
   // "비케이알 버거킹"처럼 법인명이 앞에 붙은 경우: 마지막 단어로 근처만
   const words = merchant.split(" ");
-  if (loc && words.length > 1 && words[words.length - 1].length >= 2) tries.push({ q: words[words.length - 1], loc, radius: 1500 });
+  const center = loc ?? anchors[0] ?? null;
+  const alt = words.length > 1 && words[words.length - 1].length >= 2 ? words[words.length - 1] : null;
+  if (center && alt) tries.push({ q: alt, loc: center, radius: 1500 });
+
+  const pool: KakaoDoc[] = [];
   for (const t of tries) {
     if (budget.remaining < 1) break;
-    const docs = await keyword(t.q, t.loc, t.radius, budget);
-    const best = pick(docs, t.q, loc);
-    if (!best) continue;
-    const place = toPlace(best.doc);
-    const food = best.doc.category_group_code === "FD6" || best.doc.category_group_code === "CE7";
-    if (!food) {
-      const cat = place.category.split(">").map((s) => s.trim());
-      // 음식점 분류가 아니어도 이름에 음식 업종이 보이면(푸드코트 매장 등) 음식으로 본다
-      if (NOT_FOOD_CATEGORY.test(place.category) || !/음식|카페|베이커리|제과|디저트/.test(place.category)) {
-        return { status: "notFood", reason: cat[cat.length - 1] || "음식점 아님", place };
-      }
-    }
-    return { status: "matched", place, confidence: Math.min(1, best.score) };
+    pool.push(...(await keyword(t.q, t.loc, t.radius, budget)));
+    const ranked = rank(pool, merchant, loc, anchors, alt);
+    const top = ranked[0];
+    // 결제 위치 1.5km 안에 이름이 잘 맞는 곳이 있으면 더 찾지 않는다
+    if (top && loc && top.distance != null && top.distance < 1500 && top.score >= 0.9) break;
+    // 기준점 근처에서 찾았으면 전국 검색은 하지 않는다
+    if (top && !loc && t.loc && top.distance != null && top.distance < 8000 && top.score >= 0.85) break;
   }
-  return { status: "unmatched" };
+  const ranked = rank(pool, merchant, loc, anchors, alt);
+  const candidates = ranked.slice(0, 6);
+  const top = ranked[0];
+  if (!top) return { status: "unmatched", candidates: [] };
+
+  const doc = pool.find((d) => d.id === top.id)!;
+  if (!isFood(doc)) {
+    const cat = top.category.split(">").map((x) => x.trim());
+    return { status: "notFood", reason: cat[cat.length - 1] || "음식점 아님", place: top, candidates };
+  }
+  // 애매한지: 결제 위치가 없거나 멀고, 이름이 비슷한 다른 지점이 점수 차이 적게 있을 때
+  const second = ranked.find((c) => c.id !== top.id && c.score >= 0.8);
+  const preciseLoc = !!loc && top.distance != null && top.distance < 1500;
+  const ambiguous = !preciseLoc && (!!second && top.score - second.score < 0.15 || (!loc && !anchors.length) || (top.distance != null && top.distance > 10000));
+  return { status: "matched", place: top, confidence: Math.min(1, top.score), ambiguous, candidates };
+}
+
+/** 가게 이름으로 장소 찾기 (타임라인에서 장소 바꾸기). 위치가 있으면 가까운 순 */
+export async function searchPlaces(q: string, loc: LatLng | null, budget: Budget): Promise<Candidate[]> {
+  const query = cleanMerchantName(q) || q.trim();
+  if (!query) return [];
+  const docs = await keyword(query, loc, loc ? 20000 : 0, budget, loc ? "distance" : "accuracy");
+  return docs.map((d) => ({
+    ...toPlace(d),
+    distance: loc ? Math.round(haversine(loc, { lat: Number(d.y), lng: Number(d.x) })) : null,
+    score: 0,
+  }));
 }

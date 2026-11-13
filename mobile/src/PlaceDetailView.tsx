@@ -427,9 +427,12 @@ function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors 
   const mine = notes.get(p.id);
   const [memo, setMemo] = useState(mine?.memo ?? "");
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // 평가를 남긴 곳은 펼쳐서, 아직 없는 곳은 접어서 시작
+  const [open, setOpen] = useState(!!mine);
   useEffect(() => {
     setMemo(notes.get(p.id)?.memo ?? "");
     setSavedAt(null);
+    setOpen(!!notes.get(p.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.id]);
   // 예전 평가에 식당 정보가 없으면 채워서 타임라인에서 다시 열 수 있게
@@ -479,12 +482,25 @@ function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors 
 
   return (
     <View style={[styles.myBox, { borderColor: c.line, backgroundColor: c.surface }]}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={open ? "내 평가 접기" : "내 평가 펼치기"}
+        hitSlop={8}
+      >
         <Text style={{ fontSize: 14, fontWeight: "800", color: c.text }}>내 평가</Text>
-        {mine?.updatedAt ? (
-          <Text style={{ fontSize: 11, color: c.muted }}>{new Date(mine.updatedAt).toLocaleDateString("ko-KR")}</Text>
-        ) : null}
-      </View>
+        <Text style={{ flex: 1, fontSize: 12, color: mine?.rating ? "#F5A400" : c.muted }} numberOfLines={1}>
+          {mine
+            ? [mine.rating ? `★${mine.rating}` : null, mine.memo ? "메모" : null, photos.length ? `사진 ${photos.length}` : null].filter(Boolean).join(" · ")
+            : "별점·메모·사진 남기기"}
+        </Text>
+        {open && mine?.updatedAt ? <Text style={{ fontSize: 11, color: c.muted }}>{new Date(mine.updatedAt).toLocaleDateString("ko-KR")}</Text> : null}
+        <Text style={{ fontSize: 14, color: c.muted }}>{open ? "▲" : "▼"}</Text>
+      </Pressable>
+      {open && (
+      <>
       <View style={styles.stars}>
         {[1, 2, 3, 4, 5].map((n) => {
           const on = (mine?.rating ?? 0) >= n;
@@ -545,6 +561,8 @@ function MyReview({ place: p, colors: c }: { place: ScoredPlace; colors: Colors 
           <Text style={{ color: dirty ? "#fff" : c.muted, fontWeight: "700", fontSize: 13 }}>메모 저장</Text>
         </Pressable>
       </View>
+      </>
+      )}
     </View>
   );
 }

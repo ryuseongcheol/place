@@ -17,6 +17,8 @@ const Body = z.object({
         merchant: z.string().min(1).max(80),
         lat: z.number().min(33).max(39).nullish(),
         lng: z.number().min(124).max(132).nullish(),
+        /** 결제 위치가 없을 때 기준점 (같은 날 다른 결제 위치, 내 위치, 설정한 동네) */
+        anchors: z.array(z.object({ lat: z.number().min(33).max(39), lng: z.number().min(124).max(132) })).max(3).optional(),
       }),
     )
     .max(40),
@@ -34,15 +36,17 @@ export async function POST(req: Request) {
   const results: Array<{ id: string; result: MerchantMatch }> = [];
   for (const it of items) {
     const loc = it.lat != null && it.lng != null ? { lat: it.lat, lng: it.lng } : null;
-    const key = `mm:v1:${hashKey(`${it.merchant}|${loc ? `${loc.lat.toFixed(2)},${loc.lng.toFixed(2)}` : "-"}`)}`;
+    const anchors = loc ? [] : (it.anchors ?? []);
+    const where = loc ? `${loc.lat.toFixed(3)},${loc.lng.toFixed(3)}` : anchors.map((a) => `${a.lat.toFixed(2)},${a.lng.toFixed(2)}`).join(";") || "-";
+    const key = `mm:v2:${hashKey(`${it.merchant}|${where}`)}`;
     const cached = await cacheGet<MerchantMatch>(key);
     if (cached) {
       results.push({ id: it.id, result: cached });
       continue;
     }
-    if (budget.remaining < 3) break; // 다음 요청에서
+    if (budget.remaining < 4) break; // 다음 요청에서
     try {
-      const r = await matchMerchant(it.merchant, loc, budget);
+      const r = await matchMerchant(it.merchant, loc, budget, anchors);
       results.push({ id: it.id, result: r });
       await cachePut(key, r, r.status === "unmatched" ? 3 * 86400 : 30 * 86400);
     } catch (e) {
