@@ -11,7 +11,6 @@ export interface ParsedPayment {
 
 const SOURCE_BY_PACKAGE: Record<string, string> = {
   "com.kakaopay.app": "카카오페이",
-  "com.kakao.talk": "카카오페이",
   "com.nhn.android.search": "네이버페이",
   "com.naverfin.payapp": "네이버페이",
   "viva.republica.toss": "토스",
@@ -38,6 +37,7 @@ const SOURCE_WORDS = ["네이버페이", "카카오페이", "토스", "페이코
 
 function detectSource(pkg: string, title: string, text: string): string {
   if (SOURCE_BY_PACKAGE[pkg]) return SOURCE_BY_PACKAGE[pkg];
+  // 카카오톡 알림톡·문자로 온 카드 알림: 보낸 곳(제목)과 본문에서 카드사를 찾는다
   const t = `${title} ${text}`;
   const w = SOURCE_WORDS.find((s) => t.includes(s));
   if (!w) return "카드";
@@ -52,6 +52,8 @@ const NOT_MERCHANT = /원|승인|결제|누적|잔액|일시불|할부|체크|�
 
 /** 결제가 끝났다는 표현 */
 const PAID = /승인|결제\s*(가|이)?\s*(완료|되었|됐|했|하였|금액|내역)|결제\s*$|결제\s*\n|원\s*(결제|사용|승인)|사용\s*(했|하셨|되었|완료|금액)|일시불|할부|체크카드|출금/m;
+const MESSENGERS = /^(com\.kakao\.talk|com\.samsung\.android\.messaging|com\.google\.android\.apps\.messaging|com\.android\.mms|com\.android\.messaging|com\.lge\.message|jp\.naver\.line\.android)$/;
+const STRICT = /승인|일시불|할부|누적|체크카드|결제\s*(가\s*)?(완료|되었|됐)|사용\s*(완료|되었)/;
 /** 광고·안내 문구 */
 const AD = /결제\s*하면|결제\s*시|하시면|이벤트|쿠폰\s*(지급|발급|도착)|혜택|광고|\(광고\)|프로모션|추천해요/;
 
@@ -83,6 +85,8 @@ export function parsePaymentNotification(n: { package: string; title: string; te
   const all = `${title}\n${text}`;
   // 실제 결제가 일어났다는 표현이 있어야 한다 ("결제하면 할인" 같은 광고는 제외)
   if (!PAID.test(all) || AD.test(all)) return null;
+  // 메신저·문자 앱은 친구 대화도 오므로 카드 승인 문구가 확실할 때만
+  if (MESSENGERS.test(n.package) && !STRICT.test(all)) return null;
   const amount = pickAmount(all);
   if (amount === null) return null;
   const canceled = /취소/.test(all) && !/취소\s*(가능|하려면)/.test(all);

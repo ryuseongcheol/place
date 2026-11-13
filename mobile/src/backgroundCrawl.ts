@@ -17,7 +17,7 @@ if (Platform.OS !== "web") {
   TaskManager.defineTask(CRAWL_TASK, async () => {
     try {
       // 결제 알림 → 방문 기록 (가게 맞추기까지)
-      await syncPayments({ force: true }).catch(() => {});
+      await syncPayments({ force: true, scan: true }).catch(() => {});
       await runCrawls({ deadline: Date.now() + RUN_LIMIT_MS });
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch {

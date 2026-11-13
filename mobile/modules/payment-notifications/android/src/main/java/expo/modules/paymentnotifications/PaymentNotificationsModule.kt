@@ -70,8 +70,21 @@ class PaymentNotificationsModule : Module() {
       Unit
     }
 
+    /** 알림창에 떠 있는 결제 알림 다시 훑기. 리스너가 연결돼 있지 않으면 다시 연결을 요청한다 */
+    Function("scanActive") {
+      val inst = PaymentNotificationListener.instance
+      if (inst == null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+          try { NotificationListenerService.requestRebind(component()) } catch (e: Exception) {}
+        }
+        mapOf<String, Any>("connected" to false, "captured" to 0)
+      } else {
+        mapOf<String, Any>("connected" to true, "captured" to inst.scanActive())
+      }
+    }
+
     Function("getStatus") {
-      PaymentStore.status(context)
+      PaymentStore.status(context) + mapOf("connected" to (PaymentNotificationListener.instance != null))
     }
   }
 }

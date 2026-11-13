@@ -5,7 +5,7 @@ import { regionAtLocation, searchRegions, type RegionHit } from "./api";
 import { APP_VERSION, BUILD_NUMBER, COMMIT, checkLatestRelease, type LatestRelease } from "./appVersion";
 import { openAppDetails, openNotificationAccessSettings } from "../modules/payment-notifications";
 import { usePaymentAccess } from "./paymentAccess";
-import { syncPayments, usePayments } from "./payments";
+import { getIgnoredNotifications, syncPayments, syncResultText, usePayments, type IgnoredNotification } from "./payments";
 import { MAX_REGIONS, useRegions } from "./regions";
 import { RADII } from "./SearchPanel";
 import type { Colors } from "./theme";
@@ -31,6 +31,21 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
   const access = usePaymentAccess();
   const { list: payments } = usePayments();
   const [paySync, setPaySync] = useState<string | null>(null);
+  const [paySyncing, setPaySyncing] = useState(false);
+  const [ignored, setIgnored] = useState<IgnoredNotification[] | null>(null);
+  const syncNow = async () => {
+    setPaySyncing(true);
+    setPaySync("알림창과 저장된 결제 알림을 확인하는 중…");
+    try {
+      setPaySync(syncResultText(await syncPayments({ fallbackLoc: me, force: true, scan: true })));
+    } catch (e) {
+      setPaySync(e instanceof Error ? e.message : "가져오지 못했어요");
+    } finally {
+      setPaySyncing(false);
+      access.refresh();
+      if (ignored) setIgnored(await getIgnoredNotifications());
+    }
+  };
 
   const checkUpdate = async () => {
     setLatest("checking");
@@ -193,8 +208,8 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
               <Text style={{ color: c.muted, fontSize: 13 }}>이 설치 버전(또는 웹 미리보기)에서는 사용할 수 없어요. 최신 안드로이드 APK가 필요해요.</Text>
             ) : (
               <>
-                <Text style={{ fontSize: 15, fontWeight: "700", color: access.enabled ? c.naver : c.errorText }}>
-                  {access.enabled ? "● 켜져 있어요" : "○ 꺼져 있어요"}
+                <Text style={{ fontSize: 15, fontWeight: "700", color: access.enabled ? (access.status?.connected === false ? c.warnText : c.naver) : c.errorText }}>
+                  {!access.enabled ? "○ 꺼져 있어요" : access.status?.connected === false ? "● 허용됨 · 리스너 연결 대기 중" : "● 켜져 있어요"}
                 </Text>
                 <Text style={{ fontSize: 12, color: c.muted, marginTop: 6, lineHeight: 18 }}>
                   {[
@@ -211,24 +226,37 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
                     <Text style={{ color: c.accent, fontSize: 13, fontWeight: "700" }}>{access.enabled ? "알림 접근 설정" : "알림 접근 켜기"}</Text>
                   </Pressable>
                   {access.enabled && (
-                    <Pressable
-                      onPress={async () => {
-                        setPaySync("가져오는 중…");
-                        try {
-                          const r = await syncPayments({ fallbackLoc: me, force: true });
-                          setPaySync(`새 결제 ${r.added}건 · 가게 찾음 ${r.matched}건`);
-                        } catch (e) {
-                          setPaySync(e instanceof Error ? e.message : "실패");
-                        }
-                        access.refresh();
-                      }}
-                      hitSlop={6}
-                    >
-                      <Text style={{ color: c.text, fontSize: 13, fontWeight: "600" }}>지금 가져오기</Text>
+                    <Pressable onPress={syncNow} disabled={paySyncing} hitSlop={6}>
+                      <Text style={{ color: paySyncing ? c.muted : c.text, fontSize: 13, fontWeight: "600" }}>{paySyncing ? "가져오는 중…" : "지금 가져오기"}</Text>
+                    </Pressable>
+                  )}
+                  {access.enabled && (
+                    <Pressable onPress={async () => setIgnored(ignored ? null : await getIgnoredNotifications())} hitSlop={6}>
+                      <Text style={{ color: c.muted, fontSize: 13, fontWeight: "600" }}>{ignored ? "닫기" : "해석 못한 알림"}</Text>
                     </Pressable>
                   )}
                 </View>
-                {paySync && <Text style={{ fontSize: 12, color: c.muted, marginTop: 8 }}>{paySync}</Text>}
+                {paySync && <Text style={{ fontSize: 12, color: c.text, marginTop: 8, lineHeight: 18 }}>{paySync}</Text>}
+                {ignored && (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={{ fontSize: 12, color: c.muted, lineHeight: 18 }}>
+                      결제 알림처럼 보였지만 읽지 못한 알림이에요. 결제였다면 문구를 알려주시면(카드번호·이름은 지우고) 읽을 수 있게 고칠게요.
+                    </Text>
+                    {ignored.length === 0 && <Text style={{ fontSize: 13, color: c.muted, marginTop: 6 }}>없어요.</Text>}
+                    {ignored.map((n, i) => (
+                      <View key={`${n.at}-${i}`} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line, paddingVertical: 8, marginTop: 6 }}>
+                        <Text style={{ fontSize: 11, color: c.muted }}>
+                          {new Date(n.at).toLocaleString("ko-KR")} · {n.package}
+                        </Text>
+                        <Text selectable style={{ fontSize: 13, color: c.text, marginTop: 2 }}>
+                          {n.title}
+                          {"\n"}
+                          {n.text}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
                 {!access.enabled && (
                   <View style={[styles.toast, { backgroundColor: c.warnBg, marginTop: 12 }]}>
                     <Text style={{ color: c.warnText, fontSize: 13, lineHeight: 19 }}>

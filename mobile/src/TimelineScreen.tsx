@@ -8,7 +8,7 @@ import { dayKey, dayLabel, monthStart, shortDate, timeLabel, won } from "./dates
 import { useFavorites } from "./favorites";
 import { useMyNotes, type MyNote } from "./myNotes";
 import { usePaymentAccess } from "./paymentAccess";
-import { rematchPayment, removePayment, syncPayments, updatePayment, usePayments, type PaymentRecord } from "./payments";
+import { rematchPayment, removePayment, syncPayments, syncResultText, updatePayment, usePayments, type PaymentRecord } from "./payments";
 import PhotoViewer from "./PhotoViewer";
 import { snapOf, type PlaceSnap } from "./placeSnap";
 import { categoryIcon } from "./shared";
@@ -64,6 +64,7 @@ export default function TimelineScreen({ visible, onClose, onOpenPlace, colors: 
   const [filter, setFilter] = useState<Filter>("all");
   const [showHidden, setShowHidden] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [fixing, setFixing] = useState<PaymentRecord | null>(null);
   const [viewer, setViewer] = useState<{ photos: string[]; index: number } | null>(null);
 
@@ -195,7 +196,9 @@ export default function TimelineScreen({ visible, onClose, onOpenPlace, colors: 
   const refresh = async () => {
     setSyncing(true);
     try {
-      await syncPayments({ fallbackLoc: me, force: true });
+      setSyncMsg(syncResultText(await syncPayments({ fallbackLoc: me, force: true, scan: true })));
+    } catch (e) {
+      setSyncMsg(e instanceof Error ? e.message : "가져오지 못했어요");
     } finally {
       setSyncing(false);
     }
@@ -367,6 +370,12 @@ export default function TimelineScreen({ visible, onClose, onOpenPlace, colors: 
       )}
       {!access.supported && Platform.OS === "android" && (
         <Text style={[styles.banner, { backgroundColor: c.warnBg, color: c.warnText, fontSize: 13 }]}>이 설치 버전에는 결제 알림 읽기 기능이 없어요. 최신 APK로 업데이트해 주세요.</Text>
+      )}
+
+      {syncMsg && (
+        <Pressable onPress={() => setSyncMsg(null)} style={[styles.banner, { backgroundColor: c.surface2 }]}>
+          <Text style={{ color: c.text, fontSize: 13, lineHeight: 19 }}>{syncMsg}</Text>
+        </Pressable>
       )}
 
       {/* 필터 */}

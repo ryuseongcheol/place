@@ -16,6 +16,8 @@ export interface RawPaymentNotification {
 }
 
 export interface PaymentListenerStatus {
+  /** 지금 리스너가 시스템에 붙어 있는지 */
+  connected?: boolean;
   connectedAt?: number | null;
   disconnectedAt?: number | null;
   lastCapturedAt?: number | null;
@@ -31,6 +33,7 @@ interface NativeModule {
   getPending(): string;
   ack(maxPostedAt: number): void;
   getStatus(): PaymentListenerStatus;
+  scanActive(): { connected: boolean; captured: number };
 }
 
 // 안드로이드 앱에만 있다 (웹·iOS·예전 APK 에서는 null)
@@ -79,6 +82,15 @@ export function ackPayments(maxPostedAt: number) {
 export function getListenerStatus(): PaymentListenerStatus | null {
   try {
     return native?.getStatus() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 알림창에 떠 있는 결제 알림 다시 훑기 (예전 APK면 null) */
+export function scanActiveNotifications(): { connected: boolean; captured: number } | null {
+  try {
+    return native?.scanActive ? native.scanActive() : null;
   } catch {
     return null;
   }

@@ -14,10 +14,11 @@ export function usePaymentAccess() {
   const [status, setStatus] = useState<PaymentListenerStatus | null>(() => getListenerStatus());
   const refresh = useCallback(() => {
     const on = isNotificationAccessEnabled();
+    const st = getListenerStatus();
     setEnabled(on);
-    setStatus(getListenerStatus());
-    // 허용돼 있는데 한 번도 연결된 적 없으면 다시 붙여 달라고
-    if (on) requestRebind();
+    setStatus(st);
+    // 허용돼 있는데 리스너가 붙어 있지 않으면 다시 붙여 달라고
+    if (on && st?.connected === false) requestRebind();
   }, []);
   useEffect(() => {
     refresh();

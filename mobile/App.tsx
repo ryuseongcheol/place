@@ -132,7 +132,7 @@ function MapScreen() {
   const meRef = useRef(me);
   meRef.current = loc.status === "ok" ? me : null;
   useEffect(() => {
-    const run = () => syncPayments({ fallbackLoc: meRef.current }).catch(() => {});
+    const run = () => syncPayments({ fallbackLoc: meRef.current, scan: true }).catch(() => {});
     const t = setTimeout(run, 1500);
     const sub = AppState.addEventListener("change", (st) => st === "active" && run());
     return () => {
