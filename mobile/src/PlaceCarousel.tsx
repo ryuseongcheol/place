@@ -27,10 +27,12 @@ interface Props {
   distanceOf: (p: ScoredPlace) => number | null;
   colors: Colors;
   iconsReady?: boolean;
+  /** 추천 순위 번호 붙이기 (저장 리스트는 번호 없이) */
+  numbered?: boolean;
 }
 
 /** 지도 아래 맛집 카드: 좌우로 넘기면 지도에서 그 가게가 선택된다 */
-const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel({ places, index, onIndexChange, onOpen, distanceOf, colors: c, iconsReady }, ref) {
+const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel({ places, index, onIndexChange, onOpen, distanceOf, colors: c, iconsReady, numbered = true }, ref) {
   const { width } = useWindowDimensions();
   const cardW = width - SIDE * 2;
   const step = cardW + GAP;
@@ -85,7 +87,7 @@ const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel
       scrollEventThrottle={32}
       windowSize={5}
       renderItem={({ item, index: i }) => (
-        <PlaceCard place={item} rank={i + 1} width={cardW} near={Math.abs(i - index) <= 1} distance={distanceOf(item)} onPress={() => onOpen(item)} colors={c} iconsReady={iconsReady} />
+        <PlaceCard place={item} rank={numbered ? i + 1 : null} width={cardW} near={Math.abs(i - index) <= 1} distance={distanceOf(item)} onPress={() => onOpen(item)} colors={c} iconsReady={iconsReady} />
       )}
     />
   );
@@ -104,7 +106,7 @@ function PlaceCard({
   iconsReady,
 }: {
   place: ScoredPlace;
-  rank: number;
+  rank: number | null;
   width: number;
   /** 보이는 카드와 그 옆 카드만 사진을 불러온다 */
   near: boolean;
@@ -126,13 +128,13 @@ function PlaceCard({
   ];
 
   return (
-    <Pressable onPress={onPress} style={[styles.card, { width, backgroundColor: c.surface }]} accessibilityRole="button" accessibilityLabel={`${rank}. ${p.name} 상세 보기`}>
+    <Pressable onPress={onPress} style={[styles.card, { width, backgroundColor: c.surface }]} accessibilityRole="button" accessibilityLabel={`${rank != null ? `${rank}. ` : ""}${p.name} 상세 보기`}>
       <View style={styles.head}>
         <Text style={[styles.name, { color: c.text }]} numberOfLines={1}>
-          <Text style={{ color: c.muted }}>{rank}. </Text>
+          {rank != null ? <Text style={{ color: c.muted }}>{rank}. </Text> : null}
           {p.name}
         </Text>
-        <Text style={{ fontSize: 15, fontWeight: "800", color: c.accent }}>{p.score}점</Text>
+        {p.score > 0 && <Text style={{ fontSize: 15, fontWeight: "800", color: c.accent }}>{p.score}점</Text>}
         {p.kakao?.rating != null && (
           <Text style={{ fontSize: 14, color: c.text }}>
             <Text style={{ color: c.muted }}> · </Text>

@@ -184,20 +184,35 @@ function MapScreen() {
   );
   const resultPlaces = useMemo(() => sortPlaces(results?.places ?? []), [results, sortPlaces]);
 
-  // ----- 결과 카드 (지도 아래 좌우로 넘기기) -----
+  const listPlaces = useMemo(
+    () => (layer === "favorites" ? sortPlaces(fav.placesIn(favGroupId)) : resultPlaces),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layer, favGroupId, fav.items, resultPlaces, sortPlaces],
+  );
+
+  // ----- 맛집 카드 (지도 아래 좌우로 넘기기): 추천 결과·저장 리스트 모두 -----
+  // 검색하면 바로 뜨고, 지도에서 가게를 누르면 그 가게 카드가 뜬다. 카드를 누르면 상세 전체 화면
+  const [cardsOpen, setCardsOpen] = useState(false);
   const [cardIndex, setCardIndex] = useState(0);
   const carouselRef = useRef<PlaceCarouselRef>(null);
-  const showCards = layer === "results" && !!results && resultPlaces.length > 0 && snap === "closed" && !searchOpen;
-  const cardPlace = showCards ? (resultPlaces[cardIndex] ?? null) : null;
+  const showCards = cardsOpen && listPlaces.length > 0 && snap === "closed" && !searchOpen && (layer === "favorites" || !!results);
+  const cardPlace = showCards ? (listPlaces[cardIndex] ?? null) : null;
   // AI 정렬·정렬 방식이 바뀌어도 보고 있던 가게 카드에 머문다
   const cardPlaceId = useRef<string | null>(null);
   useEffect(() => {
-    const i = cardPlaceId.current ? resultPlaces.findIndex((p) => p.id === cardPlaceId.current) : -1;
+    const i = cardPlaceId.current ? listPlaces.findIndex((p) => p.id === cardPlaceId.current) : -1;
     setCardIndex(i >= 0 ? i : 0);
-  }, [resultPlaces]);
+  }, [listPlaces]);
   useEffect(() => {
-    cardPlaceId.current = resultPlaces[cardIndex]?.id ?? null;
-  }, [cardIndex, resultPlaces]);
+    cardPlaceId.current = listPlaces[cardIndex]?.id ?? null;
+  }, [cardIndex, listPlaces]);
+  const closeCards = () => {
+    setCardsOpen(false);
+    if (layer === "results") {
+      setResults(null);
+      setActiveThemeIds([]);
+    }
+  };
   // 카드를 넘기면 지도도 그 가게로
   const lastPanned = useRef<string | null>(null);
   useEffect(() => {
@@ -208,9 +223,8 @@ function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardPlace?.id]);
   useEffect(() => {
-    lastPanned.current = null; // 새 검색이면 처음엔 전체 보기
-  }, [results?.id]);
-  const listPlaces = layer === "favorites" ? sortPlaces(fav.placesIn(favGroupId)) : resultPlaces;
+    lastPanned.current = null; // 새 검색·다른 리스트면 처음엔 전체 보기
+  }, [results?.id, layer, favGroupId]);
   // 타임라인 등 목록 밖에서 연 식당도 지도에 보이게
   const mapPlaces =
     sheet.mode === "detail" && snap !== "closed" && !listPlaces.some((p) => p.id === sheet.place.id) ? [...listPlaces, sheet.place] : listPlaces;
@@ -315,6 +329,7 @@ function MapScreen() {
       setCardIndex(0);
       if (next.places.length) {
         // 결과는 지도 아래 카드로 (목록은 "리스트로 보기")
+        setCardsOpen(true);
         setSheet({ mode: "results" });
         setSnap("closed");
         setSearchOpen(false);
@@ -363,9 +378,9 @@ function MapScreen() {
   }, [source]);
 
   const openDetail = useCallback(
-    (place: ScoredPlace, back: ListMode | null) => {
+    (place: ScoredPlace, back: ListMode | null, opts?: { full?: boolean }) => {
       setSheet({ mode: "detail", place, back });
-      setSnap((s) => (s === "full" && back ? "full" : "half"));
+      setSnap((s) => (opts?.full ? "full" : s === "full" && back ? "full" : "half"));
       sheetRef.current?.scrollToTop();
       mapRef.current?.focus(place.lat, place.lng);
     },
@@ -383,6 +398,7 @@ function MapScreen() {
   };
 
   const openFavorites = () => {
+    setCardsOpen(false);
     setLayer("favorites");
     setFavGroupId(null);
     setFavEditing(false);
@@ -402,8 +418,7 @@ function MapScreen() {
         return true;
       }
       if (showCards) {
-        setResults(null);
-        setActiveThemeIds([]);
+        closeCards();
         return true;
       }
       return false;
@@ -461,7 +476,11 @@ function MapScreen() {
         places={places}
         colors={c}
         distanceOf={distanceOf}
-        onPick={(p) => openDetail(p, listBack({ mode: "favList", groupId: sheet.groupId }))}
+        onPick={(p) => {
+          const i = listPlaces.findIndex((x) => x.id === p.id);
+          if (i >= 0) setCardIndex(i);
+          openDetail(p, listBack({ mode: "favList", groupId: sheet.groupId }));
+        }}
         numbered={false}
         badgeColor={(p) => colorHex(fav.colorOf(p.id) ?? "red")}
         emptyText="이 리스트에 저장한 식당이 없어요."
@@ -485,7 +504,7 @@ function MapScreen() {
         colors={c}
         distanceOf={distanceOf}
         onPick={(p) => {
-          const i = resultPlaces.findIndex((x) => x.id === p.id);
+          const i = listPlaces.findIndex((x) => x.id === p.id);
           if (i >= 0) setCardIndex(i);
           openDetail(p, { mode: "results" });
         }}
@@ -510,10 +529,14 @@ function MapScreen() {
         starMarkers={layer === "favorites"}
         iconsReady={iconsReady}
         onSelect={(p) => {
-          // 카드 보기 중이면 그 가게 카드로 넘기고, 이미 고른 가게를 한 번 더 누르면 상세
-          const i = showCards ? resultPlaces.findIndex((x) => x.id === p.id) : -1;
-          if (i >= 0 && i !== cardIndex) setCardIndex(i);
-          else openDetail(p, null);
+          // 지도에서 가게를 누르면 그 가게 카드 팝업 (열려 있던 시트는 닫는다). 카드를 누르면 상세 전체 화면
+          const i = listPlaces.findIndex((x) => x.id === p.id);
+          if (i >= 0) {
+            setCardIndex(i);
+            setCardsOpen(true);
+            setSearchOpen(false);
+            setSnap("closed");
+          } else openDetail(p, null);
         }}
         onTapMap={() => snap === "half" && setSnap("closed")}
         padding={{ top: topArea, bottom: snap === "half" ? Math.round(H * HALF_RATIO) : showCards ? CARD_HEIGHT + insets.bottom + 70 : 0 }}
@@ -580,10 +603,15 @@ function MapScreen() {
       {showCards && (
         <>
           <View style={[styles.cardBar, { bottom: insets.bottom + 12 + CARD_HEIGHT + 10 }]} pointerEvents="box-none">
-            <Pressable style={[styles.pill, { backgroundColor: c.surface }]} onPress={() => showList({ mode: "results" })} accessibilityRole="button" accessibilityLabel="리스트로 보기">
+            <Pressable
+              style={[styles.pill, { backgroundColor: c.surface }]}
+              onPress={() => showList(layer === "favorites" ? { mode: "favList", groupId: favGroupId } : { mode: "results" })}
+              accessibilityRole="button"
+              accessibilityLabel="리스트로 보기"
+            >
               <Text style={{ fontSize: 15, color: c.accent, fontWeight: "800" }}>☰</Text>
               <Text style={{ fontSize: 14, fontWeight: "700", color: c.text }}>리스트로 보기</Text>
-              <Text style={{ fontSize: 13, color: c.muted }}>{`${cardIndex + 1}/${resultPlaces.length}`}</Text>
+              <Text style={{ fontSize: 13, color: c.muted }}>{`${cardIndex + 1}/${listPlaces.length}`}</Text>
             </Pressable>
             <View style={{ flex: 1 }} />
             <Pressable
@@ -599,17 +627,14 @@ function MapScreen() {
             </Pressable>
             <Pressable
               style={[styles.round, { backgroundColor: c.surface }]}
-              onPress={() => {
-                setResults(null);
-                setActiveThemeIds([]);
-              }}
+              onPress={closeCards}
               accessibilityRole="button"
-              accessibilityLabel="추천 결과 닫기"
+              accessibilityLabel={layer === "favorites" ? "카드 닫기" : "추천 결과 닫기"}
             >
               <Text style={{ fontSize: 17, color: c.text }}>✕</Text>
             </Pressable>
           </View>
-          {!!results?.warnings.length && (
+          {layer === "results" && !!results?.warnings.length && (
             <Pressable onPress={() => showList({ mode: "results" })} style={[styles.cardNotice, { bottom: insets.bottom + 12 + CARD_HEIGHT + 70, backgroundColor: c.warnBg }]}>
               <Text style={{ color: c.warnText, fontSize: 12 }} numberOfLines={1}>
                 {results.warnings[0]}
@@ -619,10 +644,11 @@ function MapScreen() {
           <View style={[styles.cards, { bottom: insets.bottom + 12 }]}>
             <PlaceCarousel
               ref={carouselRef}
-              places={resultPlaces}
+              places={listPlaces}
+              numbered={layer === "results"}
               index={cardIndex}
               onIndexChange={setCardIndex}
-              onOpen={(p) => openDetail(p, null)}
+              onOpen={(p) => openDetail(p, null, { full: true })}
               distanceOf={distanceOf}
               colors={c}
               iconsReady={iconsReady}

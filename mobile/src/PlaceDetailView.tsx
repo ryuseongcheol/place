@@ -5,6 +5,7 @@ import { useDetail } from "./detailCache";
 import { useMyNotes } from "./myNotes";
 import { MAX_MY_PHOTOS, deletePhotoFile, pickFromLibrary, takePhoto } from "./myPhotos";
 import MyVisits from "./MyVisits";
+import NaverReviews from "./NaverReviews";
 import PhotoViewer from "./PhotoViewer";
 import { lookupNaverPlace, naverBookingUrl, naverMapSearchUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
 import { mergeShows, shortArea } from "./shared";
@@ -225,10 +226,10 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
         </Section>
       )}
 
-      {/* 리뷰 */}
-      {detail && (
+      {/* 리뷰 (네이버 리뷰는 상세를 기다리지 않고 바로 불러온다) */}
+      {(
         <Section c={c} title="리뷰">
-          {/* 네이버 방문자 리뷰: 본문은 공식 API가 없어 웹뷰로 */}
+          {/* 네이버 방문자 리뷰: 요약 상자 + 본문 (보이지 않는 웹뷰로 뽑아 옴) */}
           <Pressable
             style={[styles.sourceCard, { backgroundColor: c.naverBg }]}
             onPress={openNaverReviews}
@@ -247,7 +248,9 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
             </View>
             {findingNaver ? <ActivityIndicator color={c.naver} /> : <Text style={{ color: c.naver, fontSize: 13, fontWeight: "600" }}>보기 ›</Text>}
           </Pressable>
+          <NaverReviews place={p} colors={c} openWeb={openWeb} />
 
+          {detail && (<>
           {/* 카카오맵 후기 */}
           <View style={[styles.subHead]}>
             <Text style={{ fontSize: 14, fontWeight: "700", color: c.text }}>
@@ -283,6 +286,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
           )}
           {detail.kakaoReviews.length > 3 && !showAllReviews && <MoreButton c={c} label="후기 더보기" onPress={() => setShowAllReviews(true)} />}
           <MoreButton c={c} label="카카오맵에서 전체 후기 보기 ›" onPress={() => openWeb({ url: detail.links.kakaoReviews, title: `${p.name} 카카오맵 후기` })} />
+          </>)}
         </Section>
       )}
 

@@ -13,7 +13,8 @@ on:
         default: "https://place.spikeryu.workers.dev"
   push:
     branches: [main]
-    paths: ["mobile/**", "lib/classify.ts", "lib/themes.ts", "lib/detailFromRaw.ts", "lib/kakaoDetail.ts", "lib/util.ts", "lib/types.ts", ".github/workflows/android-apk.yml"]
+    # 앱이 같이 쓰는 서버 코드(lib/…)가 바뀌어도 새로 빌드
+    paths: ["mobile/**", "lib/classify.ts", "lib/themes.ts", "lib/detailFromRaw.ts", "lib/kakaoDetail.ts", "lib/util.ts", "lib/types.ts", "lib/shows.ts", "lib/placeName.ts", "lib/categoryIcon.ts", "lib/rankCrawled.ts", "lib/paymentParse.ts", "lib/naverReviewExtract.ts", ".github/workflows/android-apk.yml"]
 
 concurrency:
   group: android-apk-${{ github.ref }}
