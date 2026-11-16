@@ -13,6 +13,7 @@ import { rankByText, rankByTheme } from "./src/localRank";
 import { PlaceBody, PlaceHeader } from "./src/PlaceDetailView";
 import { ListHeader, PlaceList } from "./src/PlaceList";
 import PlacesMap, { type PlacesMapRef } from "./src/PlacesMap";
+import PlaceCarousel, { CARD_HEIGHT, type PlaceCarouselRef } from "./src/PlaceCarousel";
 import { checkLatestRelease } from "./src/appVersion";
 import { registerBackgroundCrawl } from "./src/backgroundCrawl";
 import { rememberLocation, syncPayments } from "./src/payments";
@@ -182,6 +183,33 @@ function MapScreen() {
     [sortMode, distanceOf, notes],
   );
   const resultPlaces = useMemo(() => sortPlaces(results?.places ?? []), [results, sortPlaces]);
+
+  // ----- 결과 카드 (지도 아래 좌우로 넘기기) -----
+  const [cardIndex, setCardIndex] = useState(0);
+  const carouselRef = useRef<PlaceCarouselRef>(null);
+  const showCards = layer === "results" && !!results && resultPlaces.length > 0 && snap === "closed" && !searchOpen;
+  const cardPlace = showCards ? (resultPlaces[cardIndex] ?? null) : null;
+  // AI 정렬·정렬 방식이 바뀌어도 보고 있던 가게 카드에 머문다
+  const cardPlaceId = useRef<string | null>(null);
+  useEffect(() => {
+    const i = cardPlaceId.current ? resultPlaces.findIndex((p) => p.id === cardPlaceId.current) : -1;
+    setCardIndex(i >= 0 ? i : 0);
+  }, [resultPlaces]);
+  useEffect(() => {
+    cardPlaceId.current = resultPlaces[cardIndex]?.id ?? null;
+  }, [cardIndex, resultPlaces]);
+  // 카드를 넘기면 지도도 그 가게로
+  const lastPanned = useRef<string | null>(null);
+  useEffect(() => {
+    if (!cardPlace || lastPanned.current === cardPlace.id) return;
+    const first = lastPanned.current === null;
+    lastPanned.current = cardPlace.id;
+    if (!first) mapRef.current?.pan(cardPlace.lat, cardPlace.lng);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardPlace?.id]);
+  useEffect(() => {
+    lastPanned.current = null; // 새 검색이면 처음엔 전체 보기
+  }, [results?.id]);
   const listPlaces = layer === "favorites" ? sortPlaces(fav.placesIn(favGroupId)) : resultPlaces;
   // 타임라인 등 목록 밖에서 연 식당도 지도에 보이게
   const mapPlaces =
@@ -205,7 +233,7 @@ function MapScreen() {
       })}
     </View>
   );
-  const selectedId = snap !== "closed" && sheet.mode === "detail" ? sheet.place.id : null;
+  const selectedId = snap !== "closed" && sheet.mode === "detail" ? sheet.place.id : (cardPlace?.id ?? null);
   const favGroupColor = favGroupId ? fav.groups.find((g) => g.id === favGroupId)?.color : null;
 
   const showList = (mode: ListMode) => {
@@ -283,7 +311,14 @@ function MapScreen() {
       if (next.places.length === 0 && !next.warnings.length) next.warnings.push("조건에 맞는 곳이 없어요. 다른 주제나 검색어로 찾아보세요.");
       setResults(next);
       setLayer("results");
-      showList({ mode: "results" });
+      cardPlaceId.current = null;
+      setCardIndex(0);
+      if (next.places.length) {
+        // 결과는 지도 아래 카드로 (목록은 "리스트로 보기")
+        setSheet({ mode: "results" });
+        setSnap("closed");
+        setSearchOpen(false);
+      } else showList({ mode: "results" });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "추천을 불러오지 못했어요.";
       setError(msg);
@@ -366,6 +401,11 @@ function MapScreen() {
         goBack();
         return true;
       }
+      if (showCards) {
+        setResults(null);
+        setActiveThemeIds([]);
+        return true;
+      }
       return false;
     });
     return () => sub.remove();
@@ -444,7 +484,11 @@ function MapScreen() {
         places={resultPlaces}
         colors={c}
         distanceOf={distanceOf}
-        onPick={(p) => openDetail(p, { mode: "results" })}
+        onPick={(p) => {
+          const i = resultPlaces.findIndex((x) => x.id === p.id);
+          if (i >= 0) setCardIndex(i);
+          openDetail(p, { mode: "results" });
+        }}
         numbered
         notices={results?.warnings}
         emptyText="추천 결과가 없어요."
@@ -465,9 +509,14 @@ function MapScreen() {
         markerColor={(p) => (layer === "favorites" ? (favGroupColor ?? fav.colorOf(p.id) ?? "red") : fav.colorOf(p.id))}
         starMarkers={layer === "favorites"}
         iconsReady={iconsReady}
-        onSelect={(p) => openDetail(p, null)}
+        onSelect={(p) => {
+          // 카드 보기 중이면 그 가게 카드로 넘기고, 이미 고른 가게를 한 번 더 누르면 상세
+          const i = showCards ? resultPlaces.findIndex((x) => x.id === p.id) : -1;
+          if (i >= 0 && i !== cardIndex) setCardIndex(i);
+          else openDetail(p, null);
+        }}
         onTapMap={() => snap === "half" && setSnap("closed")}
-        padding={{ top: topArea, bottom: snap === "half" ? Math.round(H * HALF_RATIO) : 0 }}
+        padding={{ top: topArea, bottom: snap === "half" ? Math.round(H * HALF_RATIO) : showCards ? CARD_HEIGHT + insets.bottom + 70 : 0 }}
         colors={c}
       />
 
@@ -494,7 +543,7 @@ function MapScreen() {
       )}
 
       {/* 2. 하단: 저장(즐겨찾기) · 맛집추천 · 내 위치 */}
-      {snap === "closed" && !searchOpen && (
+      {snap === "closed" && !searchOpen && !showCards && (
         <View style={[styles.bottomBar, { bottom: insets.bottom + 20 }]} pointerEvents="box-none">
           <Pressable style={[styles.pill, { backgroundColor: c.surface }]} onPress={openFavorites} accessibilityRole="button" accessibilityLabel="저장 리스트">
             <Text style={{ fontSize: 16, color: "#F5A400" }}>★</Text>
@@ -517,7 +566,7 @@ function MapScreen() {
         </View>
       )}
       {/* 내 타임라인 (내 위치 버튼 위) */}
-      {snap === "closed" && !searchOpen && (
+      {snap === "closed" && !searchOpen && !showCards && (
         <Pressable
           style={[styles.round, styles.timelineBtn, { bottom: insets.bottom + 20 + 58, backgroundColor: c.surface }]}
           onPress={() => setTimelineOpen(true)}
@@ -527,10 +576,59 @@ function MapScreen() {
           {iconsReady ? <MaterialCommunityIcons name="timeline-text-outline" size={22} color={c.text} /> : <Text style={{ fontSize: 16 }}>🕘</Text>}
         </Pressable>
       )}
-      {snap === "closed" && !searchOpen && results && layer === "results" && results.places.length > 0 && (
-        <Pressable style={[styles.listBtn, { bottom: insets.bottom + 84, backgroundColor: c.surface }]} onPress={() => showList({ mode: "results" })}>
-          <Text style={{ fontSize: 13, fontWeight: "700", color: c.text }}>☰ 목록 {results.places.length}</Text>
-        </Pressable>
+      {/* 결과 카드: 좌우로 넘기면 지도에서 그 가게가 선택된다 */}
+      {showCards && (
+        <>
+          <View style={[styles.cardBar, { bottom: insets.bottom + 12 + CARD_HEIGHT + 10 }]} pointerEvents="box-none">
+            <Pressable style={[styles.pill, { backgroundColor: c.surface }]} onPress={() => showList({ mode: "results" })} accessibilityRole="button" accessibilityLabel="리스트로 보기">
+              <Text style={{ fontSize: 15, color: c.accent, fontWeight: "800" }}>☰</Text>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: c.text }}>리스트로 보기</Text>
+              <Text style={{ fontSize: 13, color: c.muted }}>{`${cardIndex + 1}/${resultPlaces.length}`}</Text>
+            </Pressable>
+            <View style={{ flex: 1 }} />
+            <Pressable
+              style={[styles.round, { backgroundColor: c.surface }]}
+              onPress={() => {
+                locate();
+                if (me) mapRef.current?.focus(me.lat, me.lng, 15);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="내 위치"
+            >
+              <Text style={{ fontSize: 18, color: "#1a73e8" }}>◎</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.round, { backgroundColor: c.surface }]}
+              onPress={() => {
+                setResults(null);
+                setActiveThemeIds([]);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="추천 결과 닫기"
+            >
+              <Text style={{ fontSize: 17, color: c.text }}>✕</Text>
+            </Pressable>
+          </View>
+          {!!results?.warnings.length && (
+            <Pressable onPress={() => showList({ mode: "results" })} style={[styles.cardNotice, { bottom: insets.bottom + 12 + CARD_HEIGHT + 70, backgroundColor: c.warnBg }]}>
+              <Text style={{ color: c.warnText, fontSize: 12 }} numberOfLines={1}>
+                {results.warnings[0]}
+              </Text>
+            </Pressable>
+          )}
+          <View style={[styles.cards, { bottom: insets.bottom + 12 }]}>
+            <PlaceCarousel
+              ref={carouselRef}
+              places={resultPlaces}
+              index={cardIndex}
+              onIndexChange={setCardIndex}
+              onOpen={(p) => openDetail(p, null)}
+              distanceOf={distanceOf}
+              colors={c}
+              iconsReady={iconsReady}
+            />
+          </View>
+        </>
       )}
 
       {/* 바텀시트: 결과 목록 / 저장 리스트 / 식당 상세 */}
@@ -593,5 +691,8 @@ const styles = StyleSheet.create({
   recommendText: { color: "#fff", fontSize: 17, fontWeight: "800" },
   round: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", ...shadow },
   timelineBtn: { position: "absolute", right: 12 },
+  cardBar: { position: "absolute", left: 12, right: 12, flexDirection: "row", alignItems: "center", gap: 10 },
+  cards: { position: "absolute", left: 0, right: 0, height: CARD_HEIGHT + 16, paddingTop: 4 },
+  cardNotice: { position: "absolute", left: 16, right: 16, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
   listBtn: { position: "absolute", alignSelf: "center", height: 36, borderRadius: 18, paddingHorizontal: 14, justifyContent: "center", ...shadow },
 });

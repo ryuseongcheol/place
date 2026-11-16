@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { fetchPlaceDetail } from "./api";
+import { useDetail } from "./detailCache";
 import { useMyNotes } from "./myNotes";
 import { MAX_MY_PHOTOS, deletePhotoFile, pickFromLibrary, takePhoto } from "./myPhotos";
 import MyVisits from "./MyVisits";
@@ -102,27 +102,15 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
     if (naverId) openWeb({ title, url: naverBookingUrl(naverId, info?.bookingUrl) });
     else openWeb({ title, url: naverMapSearchUrl(p.name, dongOf(p.address)), naverToBooking: true });
   };
-  const [detail, setDetail] = useState<PlaceDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // 카드 목록에서 이미 받아 둔 상세가 있으면 바로 보여준다
+  const { detail, loading, error } = useDetail(p);
   const [showAllMenus, setShowAllMenus] = useState(false);
   const [showAllReviews, setShowAllReviews] = useState(false);
 
   useEffect(() => {
-    let alive = true;
-    setDetail(null);
-    setError(null);
-    setLoading(true);
     setShowAllMenus(false);
     setShowAllReviews(false);
-    fetchPlaceDetail({ id: p.id, name: p.name, lat: p.lat, lng: p.lng, naverId: p.naver?.naverId ?? null })
-      .then((d) => alive && setDetail(d))
-      .catch((e: Error) => alive && setError(e.message))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [p.id, p.name, p.lat, p.lng, p.naver?.naverId]);
+  }, [p.id]);
 
   const links = detail?.links;
 

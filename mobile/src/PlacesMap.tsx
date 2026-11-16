@@ -21,6 +21,8 @@ const NaverMap: typeof import("@mj-studio/react-native-naver-map") | null = (() 
 
 export interface PlacesMapRef {
   focus: (lat: number, lng: number, zoom?: number) => void;
+  /** 확대 수준은 그대로 두고 그 위치로 이동 */
+  pan: (lat: number, lng: number) => void;
   fitAll: () => void;
 }
 
@@ -69,6 +71,7 @@ const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
 
   useImperativeHandle(ref, () => ({
     focus: (lat, lng, zoom = 16) => mapRef.current?.animateCameraTo({ latitude: lat, longitude: lng, zoom, duration: 350 }),
+    pan: (lat, lng) => mapRef.current?.animateCameraTo({ latitude: lat, longitude: lng, duration: 300 }),
     fitAll,
   }));
 
