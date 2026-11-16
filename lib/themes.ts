@@ -1,5 +1,6 @@
-import type { AttrKey } from "./classify";
-import type { ThemeQuery } from "./types";
+import { ATTR_KEYS, type AttrKey } from "./classify";
+import type { ThemeDef, ThemeQuery } from "./types";
+export type { ThemeDef };
 
 /**
  * 추천 주제. 단어(국밥, 파스타) 대신 상황·기분으로 고르게 하고,
@@ -19,7 +20,14 @@ export interface ThemePreset {
   avoid: string[];
   attrs: Partial<Record<AttrKey, number>>;
   weights: ThemeQuery["weights"];
+  /**
+   * 고치지 않은 기본 주제들로만 이루어졌을 때 그 id 목록.
+   * 서버 DB가 미리 계산해 둔 주제별 적합도를 쓸 수 있는지 판단할 때 쓴다 (고쳤거나 새로 만든 주제면 없음)
+   */
+  ids?: string[];
 }
+
+
 
 const W = (rating: number, popularity: number, relevance: number, distance: number) => ({ rating, popularity, relevance, distance });
 
@@ -215,8 +223,81 @@ export const THEME_PRESETS: ThemePreset[] = [
 
 export const DEFAULT_WEIGHTS = W(0.4, 0.2, 0.2, 0.2);
 
+/** 주제 편집 화면의 "무엇을 더 중요하게" 선택지 */
+export const WEIGHT_PROFILES: Array<{ id: string; label: string; weights: ThemeQuery["weights"] }> = [
+  { id: "balanced", label: "균형", weights: W(0.3, 0.2, 0.35, 0.15) },
+  { id: "rating", label: "별점 우선", weights: W(0.5, 0.15, 0.25, 0.1) },
+  { id: "near", label: "가까운 곳 우선", weights: W(0.25, 0.1, 0.3, 0.35) },
+  { id: "popular", label: "인기 우선", weights: W(0.25, 0.4, 0.25, 0.1) },
+];
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * 여러 주제를 하나로 합친다.
+ * - 검색어: 주제마다 번갈아 뽑아 최대 6개 (한 주제에 쏠리지 않게)
+ * - 분류값: 가중치를 더해서 "둘 다 만족하는 곳"이 위로 (−1~1로 자름)
+ * - 피할 것: 합치되, 다른 주제가 찾는 것(검색어·카페)은 빼지 않는다
+ */
+export function combineThemes(list: ThemePreset[]): ThemePreset | undefined {
+  if (!list.length) return undefined;
+  if (list.length === 1) return list[0];
+  const keywords: string[] = [];
+  for (let i = 0; keywords.length < 6 && list.some((t) => i < t.keywords.length); i++) {
+    for (const t of list) {
+      const k = t.keywords[i];
+      if (k && !keywords.includes(k) && keywords.length < 6) keywords.push(k);
+    }
+  }
+  const includeCafe = list.some((t) => t.includeCafe);
+  const wanted = new Set(list.flatMap((t) => t.keywords));
+  const avoid = [...new Set(list.flatMap((t) => t.avoid))].filter((a) => !wanted.has(a) && !(includeCafe && /카페|커피/.test(a)));
+  const attrs: Partial<Record<AttrKey, number>> = {};
+  for (const t of list) for (const [k, v] of Object.entries(t.attrs) as Array<[AttrKey, number]>) attrs[k] = clamp((attrs[k] ?? 0) + v, -1, 1);
+  const avg = (f: (w: ThemeQuery["weights"]) => number) => list.reduce((s, t) => s + f(t.weights), 0) / list.length;
+  const builtinIds = list.every((t) => t.ids?.length) ? list.flatMap((t) => t.ids!) : undefined;
+  return {
+    id: list.map((t) => t.id).join("+"),
+    label: list.map((t) => t.label).join(" · "),
+    emoji: list.map((t) => t.emoji).join(""),
+    description: list.map((t) => t.description).filter(Boolean).join(" / "),
+    keywords,
+    includeCafe,
+    avoid,
+    attrs,
+    weights: W(avg((w) => w.rating), avg((w) => w.popularity), avg((w) => w.relevance), avg((w) => w.distance)),
+    ids: builtinIds,
+  };
+}
+
+/** 앱이 보낸 주제 내용을 안전하게 정리 (알 수 없는 분류값 버림, 길이·범위 제한) */
+export function themeFromDef(d: ThemeDef): ThemePreset {
+  const attrs: Partial<Record<AttrKey, number>> = {};
+  for (const k of ATTR_KEYS) {
+    const v = (d.attrs as Record<string, number> | undefined)?.[k];
+    if (typeof v === "number" && Number.isFinite(v) && v !== 0) attrs[k] = clamp(v, -1, 1);
+  }
+  const w = d.weights ?? DEFAULT_WEIGHTS;
+  const sum = w.rating + w.popularity + w.relevance + w.distance;
+  const words = (a: string[] | undefined, n: number) => [...new Set((a ?? []).map((x) => String(x).trim().slice(0, 30)).filter(Boolean))].slice(0, n);
+  const ids = (d.ids ?? []).filter((id) => THEME_PRESETS.some((p) => p.id === id));
+  return {
+    id: String(d.id ?? "custom").slice(0, 120),
+    label: String(d.label ?? "").trim().slice(0, 60) || "내 주제",
+    emoji: String(d.emoji ?? "").slice(0, 8),
+    description: String(d.description ?? "").slice(0, 200),
+    keywords: words(d.keywords, 6),
+    includeCafe: !!d.includeCafe,
+    avoid: words(d.avoid, 10),
+    attrs,
+    weights: sum > 0 ? W(w.rating / sum, w.popularity / sum, w.relevance / sum, w.distance / sum) : DEFAULT_WEIGHTS,
+    ids: ids.length ? ids : undefined,
+  };
+}
+
 export function getPreset(id: string | null | undefined): ThemePreset | undefined {
-  return THEME_PRESETS.find((p) => p.id === id);
+  const p = THEME_PRESETS.find((x) => x.id === id);
+  return p ? { ...p, ids: [p.id] } : undefined;
 }
 
 /** AI 없이 주제 + 자유 입력을 검색 조건으로 바꾼다 */
@@ -239,7 +320,7 @@ export function heuristicQuery(preset: ThemePreset | undefined, text: string): T
   }
   return {
     themeId: preset.id,
-    keywords: t ? [t.slice(0, 30), ...preset.keywords].slice(0, 6) : preset.keywords,
+    keywords: (t ? [t.slice(0, 30), ...preset.keywords] : preset.keywords.length ? preset.keywords : [preset.label]).slice(0, 6),
     includeCafe: preset.includeCafe,
     avoid: preset.avoid,
     boost: t.split(/\s+/).filter((w) => w.length >= 2).slice(0, 6),

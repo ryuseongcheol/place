@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from "react-native";
 import type { RegionProgress } from "./regions";
 import type { ThemePreset } from "./shared";
 import type { Colors } from "./theme";
@@ -19,8 +19,10 @@ interface Props {
   progress: Record<string, RegionProgress>;
   onPickSource: (s: Source) => void;
   themes: ThemePreset[];
-  activeThemeId: string | null;
+  /** 고른 주제 (여러 개). 칩을 누르면 넣거나 뺀다 */
+  activeThemeIds: string[];
   onPickTheme: (t: ThemePreset) => void;
+  onEditThemes: () => void;
   onOpenSettings: () => void;
   /** 설정 버튼에 빨간 점 (새 버전 있음) */
   settingsBadge?: boolean;
@@ -49,6 +51,12 @@ export function progressText(p: RegionProgress | undefined): string {
 /** 지도 위 상단: 검색창 + 설정, 그 아래 검색 범위(내 주변/지역) + 주제 칩 */
 export default function TopSearch(p: Props) {
   const c = p.colors;
+  // 주제를 고르면 고른 칩이 앞으로 오므로 처음으로 돌려 보이게
+  const chipsRef = useRef<ScrollViewInstance>(null);
+  const selKey = p.activeThemeIds.join(",");
+  useEffect(() => {
+    chipsRef.current?.scrollTo({ x: 0, animated: true });
+  }, [selKey]);
   const [menuOpen, setMenuOpen] = useState(false);
   const sourceLabel = p.source.kind === "nearby" ? "📍 내 주변" : `🏘 ${p.source.region.name}`;
 
@@ -83,7 +91,7 @@ export default function TopSearch(p: Props) {
         </Pressable>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={chipsRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
         <Pressable
           style={[styles.chip, styles.sourceChip, { backgroundColor: c.text, borderColor: c.text }]}
           onPress={() => setMenuOpen((v) => !v)}
@@ -92,8 +100,9 @@ export default function TopSearch(p: Props) {
         >
           <Text style={{ color: c.bg, fontWeight: "700", fontSize: 13 }}>{sourceLabel} ▾</Text>
         </Pressable>
-        {p.themes.map((t) => {
-          const on = p.activeThemeId === t.id;
+        {/* 고른 주제를 앞으로 */}
+        {[...p.themes.filter((t) => p.activeThemeIds.includes(t.id)), ...p.themes.filter((t) => !p.activeThemeIds.includes(t.id))].map((t) => {
+          const on = p.activeThemeIds.includes(t.id);
           return (
             <Pressable
               key={t.id}
@@ -108,6 +117,14 @@ export default function TopSearch(p: Props) {
             </Pressable>
           );
         })}
+        <Pressable
+          onPress={p.onEditThemes}
+          style={[styles.chip, { backgroundColor: c.surface, borderColor: c.line }]}
+          accessibilityRole="button"
+          accessibilityLabel="주제 편집"
+        >
+          <Text style={{ fontSize: 13, color: c.accent, fontWeight: "700" }}>✎ 편집</Text>
+        </Pressable>
       </ScrollView>
 
       {menuOpen && (

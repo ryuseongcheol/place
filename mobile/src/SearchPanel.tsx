@@ -11,8 +11,11 @@ interface Props {
   loc: LocState;
   onRelocate: () => void;
   presets: PresetChip[];
-  presetId: string | null;
-  setPresetId: (id: string | null) => void;
+  /** 고른 주제 (여러 개) */
+  selectedIds: string[];
+  onToggle: (id: string) => void;
+  /** 주제 편집 화면 열기 */
+  onEditThemes: () => void;
   text: string;
   setText: (t: string) => void;
   radius: number;
@@ -33,7 +36,8 @@ interface Props {
 export default function SearchPanel(p: Props) {
   const c = p.colors;
   const insets = useSafeAreaInsets();
-  const canSearch = p.loc.status !== "locating" && !p.loading && (p.presetId !== null || p.text.trim().length > 0);
+  const canSearch = p.loc.status !== "locating" && !p.loading && (p.selectedIds.length > 0 || p.text.trim().length > 0);
+  const picked = p.presets.filter((t) => p.selectedIds.includes(t.id));
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -72,18 +76,32 @@ export default function SearchPanel(p: Props) {
               </Pressable>
             )}
 
+            <View style={styles.chipHead}>
+              <Text style={{ flex: 1, fontSize: 12, color: c.muted }}>
+                {picked.length >= 2 ? `${picked.length}개 주제를 모두 만족하는 곳을 찾아요` : "주제 · 여러 개 고를 수 있어요"}
+              </Text>
+              {picked.length > 0 && (
+                <Pressable onPress={() => picked.forEach((t) => p.onToggle(t.id))} hitSlop={8} accessibilityRole="button">
+                  <Text style={{ fontSize: 12, color: c.muted, fontWeight: "600" }}>선택 해제</Text>
+                </Pressable>
+              )}
+              <Pressable onPress={p.onEditThemes} hitSlop={8} accessibilityRole="button" accessibilityLabel="주제 편집">
+                <Text style={{ fontSize: 13, color: c.accent, fontWeight: "700" }}>✎ 편집</Text>
+              </Pressable>
+            </View>
             <View style={styles.chips}>
               {p.presets.map((t) => {
-                const on = p.presetId === t.id;
+                const on = p.selectedIds.includes(t.id);
                 return (
                   <Pressable
                     key={t.id}
-                    onPress={() => p.setPresetId(on ? null : t.id)}
+                    onPress={() => p.onToggle(t.id)}
                     style={[styles.chip, { borderColor: on ? c.accent : c.line, backgroundColor: on ? c.accentSoft : c.surface }]}
                     accessibilityRole="button"
                     accessibilityState={{ selected: on }}
                   >
                     <Text style={{ fontSize: 14, color: on ? c.accent : c.text, fontWeight: on ? "700" : "400" }}>
+                      {on ? "✓ " : ""}
                       {t.emoji} {t.label}
                     </Text>
                   </Pressable>
@@ -128,8 +146,8 @@ export default function SearchPanel(p: Props) {
               </Pressable>
             </View>
             {p.loading && <Text style={[styles.hint, { color: c.muted }]}>카카오맵·네이버지도 리뷰를 모아서 분석하고 있어요…</Text>}
-            {!p.loading && !p.presetId && !p.text.trim() && (
-              <Text style={[styles.hint, { color: c.muted }]}>테마를 고르거나 원하는 걸 입력하세요.</Text>
+            {!p.loading && !p.selectedIds.length && !p.text.trim() && (
+              <Text style={[styles.hint, { color: c.muted }]}>주제를 고르거나(여러 개 가능) 원하는 걸 입력하세요.</Text>
             )}
             {p.error && (
               <View style={[styles.notice, { backgroundColor: c.errorBg }]}>
@@ -152,7 +170,8 @@ const styles = StyleSheet.create({
   locRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   locText: { flex: 1, fontSize: 13 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 16 },
+  chipHead: { flexDirection: "row", alignItems: "center", gap: 14, marginTop: 16 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 38, justifyContent: "center" },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, marginTop: 14 },
   actionRow: { flexDirection: "row", gap: 10, marginTop: 14 },

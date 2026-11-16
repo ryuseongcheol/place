@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isMockMode, recommend } from "@/lib/recommend";
 import { cacheGet, cachePut } from "@/lib/store";
+import { ThemeDefSchema } from "@/lib/themeSchema";
+import { hashKey } from "@/lib/util";
 import type { RecommendResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -12,6 +14,8 @@ const Body = z.object({
   lng: z.number().min(124).max(132),
   radius: z.number().int().min(200).max(5000).optional(),
   presetId: z.string().max(32).nullish(),
+  /** 고친 주제·새 주제·여러 주제를 합친 것 (있으면 presetId 대신) */
+  theme: ThemeDefSchema.nullish(),
   text: z.string().max(200).nullish(),
   /** true면 AI 재정렬 없이 바로 응답 (앱이 /api/recommend/rerank 로 이어서 요청) */
   fast: z.boolean().optional(),
@@ -42,7 +46,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "요청 형식이 올바르지 않아요. (국내 위치만 지원)" }, { status: 400 });
   }
 
-  const key = `rec:v1:${body.fast ? "f" : "a"}:${body.lat.toFixed(3)}:${body.lng.toFixed(3)}:${body.radius ?? 1000}:${body.presetId ?? ""}:${(body.text ?? "").trim()}`;
+  const themeKey = body.theme ? hashKey(JSON.stringify(body.theme)) : (body.presetId ?? "");
+  const key = `rec:v2:${body.fast ? "f" : "a"}:${body.lat.toFixed(3)}:${body.lng.toFixed(3)}:${body.radius ?? 1000}:${themeKey}:${(body.text ?? "").trim()}`;
   if (!isMockMode()) {
     const cached = await cacheGet<RecommendResponse>(key);
     if (cached) return NextResponse.json(cached, { headers: { "X-Cache": "HIT" } });

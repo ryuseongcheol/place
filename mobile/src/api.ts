@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import type { AiClassifyInput, BasePlace, CrawlCursor, CrawledPlace, ScoredPlace, CrawlDetailItem, CrawlListResponse, PlaceDetail, RecommendResponse, Region } from "./types";
+import type { ThemeDef, AiClassifyInput, BasePlace, CrawlCursor, CrawledPlace, ScoredPlace, CrawlDetailItem, CrawlListResponse, PlaceDetail, RecommendResponse, Region } from "./types";
 
 export interface PresetChip {
   id: string;
@@ -51,6 +51,8 @@ export function fetchRecommendations(body: {
   lng: number;
   radius: number;
   presetId: string | null;
+  /** 고친 주제·새 주제·여러 주제를 합친 것 */
+  theme?: ThemeDef | null;
   text: string | null;
   /** AI 재정렬 없이 먼저 받기 (rerankRecommendations 로 이어서) */
   fast?: boolean;
@@ -121,9 +123,16 @@ export function syncRegionsToServer(regions: Region[]) {
 }
 
 /** 서버 DB에서 위치·주제/검색어로 추천 */
-export function searchDb(p: { lat: number; lng: number; radius: number; themeId?: string | null; q?: string | null }) {
+export function searchDb(p: { lat: number; lng: number; radius: number; theme?: ThemeDef | null; q?: string | null }) {
+  // 주제 내용을 같이 보낸다 (고친 주제·새 주제·여러 주제)
+  if (p.theme) {
+    return request<{ places: ScoredPlace[]; inArea: number; analyzed: number }>(
+      "/api/db/search",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lat: p.lat, lng: p.lng, radius: p.radius, theme: p.theme, q: p.q ?? null }) },
+      20000,
+    );
+  }
   const qs = new URLSearchParams({ lat: String(p.lat), lng: String(p.lng), radius: String(p.radius) });
-  if (p.themeId) qs.set("theme", p.themeId);
   if (p.q) qs.set("q", p.q);
   return request<{ places: ScoredPlace[]; inArea: number; analyzed: number }>(`/api/db/search?${qs}`, undefined, 20000);
 }

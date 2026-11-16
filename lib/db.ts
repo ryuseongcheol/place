@@ -1,7 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { rankByText, rankByTheme } from "./rankCrawled";
 import { fromRow, upsertStatements, type PlaceRow } from "./placeRow";
-import { getPreset } from "./themes";
+import { getPreset, type ThemePreset } from "./themes";
 import type { CrawledPlace, ScoredPlace } from "./types";
 import { haversine } from "./util";
 
@@ -59,6 +59,8 @@ export interface DbSearch {
   lng: number;
   radius: number;
   themeId?: string | null;
+  /** 고친 주제·새 주제·여러 주제를 합친 것 (themeId 대신) */
+  theme?: ThemePreset | null;
   q?: string | null;
 }
 
@@ -77,7 +79,7 @@ export async function searchDb(db: D1, s: DbSearch): Promise<{ places: ScoredPla
     .first<{ n: number; d: number | null }>();
 
   let rows: PlaceRow[];
-  const theme = getPreset(s.themeId);
+  const theme = s.theme ?? getPreset(s.themeId);
   const q = s.q?.trim();
   if (q) {
     const likes = q
@@ -101,14 +103,26 @@ export async function searchDb(db: D1, s: DbSearch): Promise<{ places: ScoredPla
       rows = [...rows, ...more.filter((r) => !seen.has(r.id))];
     }
   } else if (theme) {
-    rows = (
-      await db
-        .prepare(
-          "SELECT p.* FROM place_themes t JOIN places p ON p.id = t.place_id WHERE t.theme_id = ? AND t.fit >= 25 AND p.lat BETWEEN ? AND ? AND p.lng BETWEEN ? AND ? ORDER BY t.fit DESC LIMIT 400",
-        )
-        .bind(theme.id, minLat, maxLat, minLng, maxLng)
-        .all<PlaceRow>()
-    ).results;
+    const ids = theme.ids ?? [];
+    if (ids.length) {
+      // 고치지 않은 기본 주제들: 미리 계산해 둔 주제별 적합도로 후보를 좁힌다 (여러 개면 하나라도 맞는 곳)
+      rows = (
+        await db
+          .prepare(
+            `SELECT p.* FROM place_themes t JOIN places p ON p.id = t.place_id WHERE t.theme_id IN (${ids.map(() => "?").join(",")}) AND t.fit >= 25 AND p.lat BETWEEN ? AND ? AND p.lng BETWEEN ? AND ? GROUP BY p.id ORDER BY MAX(t.fit) DESC LIMIT 600`,
+          )
+          .bind(...ids, minLat, maxLat, minLng, maxLng)
+          .all<PlaceRow>()
+      ).results;
+    } else {
+      // 고친 주제·새 주제: 미리 계산한 값이 없으니 분석된 곳 전체에서 분류값으로 순위
+      rows = (
+        await db
+          .prepare("SELECT * FROM places WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? AND detail_at IS NOT NULL ORDER BY review_count + naver_visitor_count DESC LIMIT 800")
+          .bind(minLat, maxLat, minLng, maxLng)
+          .all<PlaceRow>()
+      ).results;
+    }
   } else return { places: [], inArea: counts?.n ?? 0, analyzed: counts?.d ?? 0 };
 
   const places = rows.map((r) => fromRow(r, center)).filter((p) => haversine(center, p) <= s.radius);

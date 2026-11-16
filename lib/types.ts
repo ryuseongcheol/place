@@ -70,11 +70,28 @@ export interface ThemeQuery {
   weights: { rating: number; popularity: number; relevance: number; distance: number };
 }
 
+/** 앱이 서버로 보내는 주제 내용 (고친 주제·새로 만든 주제·여러 주제를 합친 것). lib/themes.ts 의 ThemePreset 과 같은 모양 */
+export interface ThemeDef {
+  id?: string;
+  /** 고치지 않은 기본 주제들로만 이루어졌을 때 그 id 목록 */
+  ids?: string[];
+  label: string;
+  emoji: string;
+  description: string;
+  keywords: string[];
+  includeCafe: boolean;
+  avoid: string[];
+  attrs: Partial<Record<string, number>>;
+  weights: ThemeQuery["weights"];
+}
+
 export interface RecommendRequest {
   lat: number;
   lng: number;
   radius?: number; // m
   presetId?: string | null;
+  /** 앱에서 고친 주제·새 주제·여러 주제를 합친 것 (있으면 presetId 대신 사용) */
+  theme?: ThemeDef | null;
   text?: string | null;
 }
 

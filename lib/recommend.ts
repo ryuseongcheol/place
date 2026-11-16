@@ -8,7 +8,7 @@ import { detectShows } from "./shows";
 import { mockKakao, mockNaver, mockPlaces } from "./mock";
 import { attachNaver } from "./naver";
 import { scorePlace } from "./score";
-import { getPreset, heuristicQuery } from "./themes";
+import { getPreset, heuristicQuery, themeFromDef } from "./themes";
 import type { BasePlace, KakaoReviewInfo, RecommendRequest, RecommendResponse, ScoredPlace, ThemeQuery } from "./types";
 import { mapLimit } from "./util";
 
@@ -21,7 +21,7 @@ export function isMockMode() {
 export async function recommend(req: RecommendRequest, opts: { skipAi?: boolean } = {}): Promise<RecommendResponse> {
   const loc = { lat: req.lat, lng: req.lng };
   const radius = Math.min(5000, Math.max(200, req.radius ?? 1000));
-  const preset = getPreset(req.presetId);
+  const preset = req.theme ? themeFromDef(req.theme) : getPreset(req.presetId);
   const text = (req.text ?? "").trim().slice(0, 200);
   const mock = isMockMode();
   const useUnofficial = process.env.UNOFFICIAL_REVIEWS !== "0";

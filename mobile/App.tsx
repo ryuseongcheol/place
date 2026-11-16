@@ -22,7 +22,9 @@ import { RegionsProvider, useRegions } from "./src/regions";
 import SaveSheet, { GroupEditor } from "./src/SaveSheet";
 import SearchPanel from "./src/SearchPanel";
 import SettingsScreen from "./src/SettingsScreen";
-import { THEME_PRESETS, getPreset, haversine, type ThemePreset } from "./src/shared";
+import { haversine, type ThemePreset } from "./src/shared";
+import ThemeEditor from "./src/ThemeEditor";
+import { ThemesProvider, themeDef, useThemes } from "./src/themes";
 import { useColors } from "./src/theme";
 import TopSearch, { type Source } from "./src/TopSearch";
 import type { ScoredPlace } from "./src/types";
@@ -60,7 +62,9 @@ export default function App() {
       <MyNotesProvider>
       <FavoritesProvider>
         <RegionsProvider>
+        <ThemesProvider>
           <MapScreen />
+        </ThemesProvider>
         </RegionsProvider>
       </FavoritesProvider>
       </MyNotesProvider>
@@ -83,9 +87,18 @@ function MapScreen() {
   const [aiEnabled, setAiEnabled] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
   const [source, setSource] = useState<Source>({ kind: "nearby" });
-  const [activeThemeId, setActiveThemeId] = useState<string | null>(null);
+  const th = useThemes();
+  // 고른 주제 (여러 개 가능)
+  const [activeThemeIds, setActiveThemeIds] = useState<string[]>([]);
+  const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [text, setText] = useState("");
-  const [panelPreset, setPanelPreset] = useState<string | null>(null);
+  const [panelThemeIds, setPanelThemeIds] = useState<string[]>([]);
+  // 주제를 숨기거나 지우면 고른 목록에서도 뺀다
+  useEffect(() => {
+    const ok = (id: string) => th.visible.some((t) => t.id === id);
+    setActiveThemeIds((ids) => (ids.every(ok) ? ids : ids.filter(ok)));
+    setPanelThemeIds((ids) => (ids.every(ok) ? ids : ids.filter(ok)));
+  }, [th.visible]);
   const [panelText, setPanelText] = useState("");
   const [radius, setRadius] = useState(1000);
   const [loading, setLoading] = useState(false);
@@ -216,7 +229,7 @@ function MapScreen() {
         if (loc.status === "locating") return;
         const radiusText = radius < 1000 ? `${radius}m` : `${radius / 1000}km`;
         // 1) 서버 DB에 이 근처를 분석해 둔 데이터가 충분하면 바로 (빠르고, 분류값이 정확함)
-        const db = await searchDb({ lat: loc.lat, lng: loc.lng, radius, themeId: theme?.id ?? null, q: q || null }).catch(() => null);
+        const db = await searchDb({ lat: loc.lat, lng: loc.lng, radius, theme: theme && !q ? themeDef(theme) : null, q: q || null }).catch(() => null);
         if (db && db.analyzed >= 30 && db.places.length >= 8) {
           next = {
             id: searchId,
@@ -228,7 +241,15 @@ function MapScreen() {
         } else {
           // 2) 아니면 실시간 (카카오 검색 + 리뷰 수집)
           //    빠른 결과를 먼저 보여주고, AI 정렬은 뒤에서 이어서 반영
-          const res = await fetchRecommendations({ lat: loc.lat, lng: loc.lng, radius, presetId: theme?.id ?? null, text: q || null, fast: true });
+          const res = await fetchRecommendations({
+            lat: loc.lat,
+            lng: loc.lng,
+            radius,
+            presetId: theme?.ids?.length === 1 ? theme.ids[0] : null,
+            theme: theme ? themeDef(theme) : null,
+            text: q || null,
+            fast: true,
+          });
           next = {
             id: searchId,
             places: res.places,
@@ -273,15 +294,18 @@ function MapScreen() {
     }
   };
 
+  /** 상단 주제 칩: 누르면 넣거나 빼고, 고른 주제를 모두 만족하는 곳으로 다시 찾는다 */
   const pickTheme = (t: ThemePreset) => {
-    if (activeThemeId === t.id && snap !== "closed" && sheet.mode === "results") return;
-    setActiveThemeId(t.id);
+    const next = activeThemeIds.includes(t.id) ? activeThemeIds.filter((x) => x !== t.id) : [...activeThemeIds, t.id];
+    setActiveThemeIds(next);
+    setPanelThemeIds(next);
     setText("");
-    runSearch({ theme: t });
+    const theme = th.combine(next);
+    if (theme) runSearch({ theme });
   };
 
   const submitText = () => {
-    setActiveThemeId(null);
+    setActiveThemeIds([]);
     runSearch({ text });
   };
 
@@ -297,7 +321,7 @@ function MapScreen() {
       firstSource.current = false;
       return;
     }
-    const theme = getPreset(activeThemeId);
+    const theme = th.combine(activeThemeIds);
     if (theme) runSearch({ theme });
     else if (text.trim()) runSearch({ text });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -333,7 +357,7 @@ function MapScreen() {
   // 안드로이드 뒤로가기
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (webTarget || settingsOpen || savePlace || timelineOpen) return false;
+      if (webTarget || settingsOpen || savePlace || timelineOpen || themeEditorOpen) return false;
       if (searchOpen) {
         setSearchOpen(false);
         return true;
@@ -460,8 +484,9 @@ function MapScreen() {
           regions={rg.regions}
           progress={rg.progress}
           onPickSource={pickSource}
-          themes={THEME_PRESETS}
-          activeThemeId={activeThemeId}
+          themes={th.visible}
+          activeThemeIds={activeThemeIds}
+          onEditThemes={() => setThemeEditorOpen(true)}
           onPickTheme={pickTheme}
           onOpenSettings={() => setSettingsOpen(true)}
           settingsBadge={updateAvailable}
@@ -519,9 +544,10 @@ function MapScreen() {
           colors={c}
           loc={loc}
           onRelocate={locate}
-          presets={THEME_PRESETS}
-          presetId={panelPreset}
-          setPresetId={setPanelPreset}
+          presets={th.visible}
+          selectedIds={panelThemeIds}
+          onToggle={(id) => setPanelThemeIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))}
+          onEditThemes={() => setThemeEditorOpen(true)}
           text={panelText}
           setText={setPanelText}
           radius={radius}
@@ -533,8 +559,8 @@ function MapScreen() {
           onRetryServer={loadServerInfo}
           sourceLabel={source.kind === "nearby" ? "내 주변 (실시간)" : `${source.region.name} (미리 수집)`}
           onSubmit={() => {
-            const theme = getPreset(panelPreset) ?? null;
-            setActiveThemeId(panelText.trim() ? null : (theme?.id ?? null));
+            const theme = th.combine(panelThemeIds) ?? null;
+            setActiveThemeIds(panelText.trim() ? [] : panelThemeIds);
             setText(panelText);
             runSearch({ theme, text: panelText });
           }}
@@ -542,6 +568,7 @@ function MapScreen() {
         />
       )}
 
+      <ThemeEditor visible={themeEditorOpen} onClose={() => setThemeEditorOpen(false)} colors={c} />
       <TimelineScreen
         visible={timelineOpen}
         onClose={() => setTimelineOpen(false)}

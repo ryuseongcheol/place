@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb, searchDb } from "@/lib/db";
+import { themeFromDef } from "@/lib/themes";
+import { ThemeDefSchema } from "@/lib/themeSchema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +24,30 @@ export async function GET(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "요청 형식이 올바르지 않아요." }, { status: 400 });
   try {
     const r = await searchDb(db, { lat: parsed.data.lat, lng: parsed.data.lng, radius: parsed.data.radius, themeId: parsed.data.theme, q: parsed.data.q });
+    return NextResponse.json(r);
+  } catch (e) {
+    console.error("[db/search]", e);
+    return NextResponse.json({ error: "DB 검색 실패" }, { status: 502 });
+  }
+}
+
+const Body = z.object({
+  lat: z.number().min(33).max(39),
+  lng: z.number().min(124).max(132),
+  radius: z.number().int().min(200).max(5000).default(1000),
+  theme: ThemeDefSchema.nullish(),
+  q: z.string().max(100).nullish(),
+});
+
+/** 고친 주제·새 주제·여러 주제를 합친 것으로 찾기 (주제 내용을 같이 보낸다) */
+export async function POST(req: Request) {
+  const db = getDb();
+  if (!db) return NextResponse.json({ error: "DB가 연결되지 않았어요." }, { status: 503 });
+  const parsed = Body.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "요청 형식이 올바르지 않아요." }, { status: 400 });
+  const b = parsed.data;
+  try {
+    const r = await searchDb(db, { lat: b.lat, lng: b.lng, radius: b.radius, theme: b.theme ? themeFromDef(b.theme) : null, q: b.q });
     return NextResponse.json(r);
   } catch (e) {
     console.error("[db/search]", e);
