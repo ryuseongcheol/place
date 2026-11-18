@@ -155,8 +155,12 @@ export interface PlaceDetail {
     naverPlace: string;
     naverVisitorReviews: string;
     naverBlogReviews: string;
+    /** 구글 리뷰 (찾았으면 리뷰 화면, 아니면 구글 지도 검색) */
+    googleReviews?: string;
   };
   sources: { kakaoDetail: SourceStatus; naverBlog: SourceStatus; naverImage: SourceStatus };
+  /** 구글 별점·리뷰 수 (GOOGLE_PLACES_API_KEY 가 있고 찾았을 때) */
+  google?: { rating: number | null; count: number; url: string } | null;
   /** 출연한 방송·가이드 id */
   shows: string[];
 }

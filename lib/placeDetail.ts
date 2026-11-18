@@ -8,6 +8,7 @@ import {
   extractPhotos,
 } from "./kakaoDetail";
 import { mockDetail } from "./mock";
+import { findGooglePlace, googleSearchUrl } from "./google";
 import { naverBlogSearch, naverImageSearch, naverPlaceLinks, naverSearchEnabled, naverShowSearch } from "./naver";
 import { detectShows, detectShowsInPosts, mergeShows } from "./shows";
 import { isMockMode } from "./recommend";
@@ -28,10 +29,11 @@ export async function getPlaceDetail(req: DetailRequest): Promise<PlaceDetail> {
   const isKakaoId = /^\d+$/.test(req.id);
   const region = await regionName({ lat: req.lat, lng: req.lng });
 
-  const [raw, blog, showPosts] = await Promise.all([
+  const [raw, blog, showPosts, google] = await Promise.all([
     useUnofficial && isKakaoId ? fetchKakaoRaw(req.id) : Promise.resolve(null),
     naverBlogSearch(req.name, region),
     naverShowSearch(req.name, region),
+    findGooglePlace(req.name, req.lat, req.lng),
   ]);
 
   let photos = raw ? extractPhotos(raw) : [];
@@ -67,7 +69,9 @@ export async function getPlaceDetail(req: DetailRequest): Promise<PlaceDetail> {
       naverPlace: naver.place,
       naverVisitorReviews: naver.visitor,
       naverBlogReviews: naver.blog,
+      googleReviews: google?.url ?? googleSearchUrl(req.name, region),
     },
+    google: google ? { rating: google.rating, count: google.count, url: google.url } : null,
     // 방송·가이드 출연: 카카오 상세 + 블로그(가게 이름과 함께 언급된 글)
     shows: mergeShows(
       raw ? detectShows([JSON.stringify(raw)]) : [],

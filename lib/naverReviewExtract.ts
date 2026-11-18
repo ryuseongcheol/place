@@ -23,6 +23,10 @@ export interface NaverReviewResult {
   type: "naverReviews";
   how: "apollo" | "script" | "dom" | "none";
   reviews: NaverVisitorReview[];
+  /** 방문자 리뷰 별점 평균·전체 수 (페이지에 있을 때) */
+  stats: { rating: number | null; count: number | null };
+  /** 네이버 예약: 예약 주소, 예약 탭만 있으면 "tab", 없으면 null */
+  booking: string | null;
   url: string;
   title: string;
 }
@@ -110,6 +114,46 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
     return out;
   }
 
+  // 방문자 리뷰 별점·수, 예약 가능 여부 (Apollo 캐시 → 화면)
+  function extras() {
+    var rating = null, count = null, booking = null;
+    var st = window.__APOLLO_STATE__;
+    if (st && typeof st === "object") {
+      for (var k in st) {
+        var o = st[k];
+        if (!o || typeof o !== "object") continue;
+        var where = k + " " + str(o.__typename);
+        for (var f in o) {
+          var v = o[f];
+          if (typeof v === "number") {
+            if (rating == null && /visitorReviewsScore|visitorReviewScore|avgRating|averageRating|starAverage/i.test(f) && v > 0 && v <= 5) rating = v;
+            if (count == null && /visitorReviewsTotal|visitorReviewCount/i.test(f) && v >= 0) count = v;
+            if (count == null && /^totalCount$/.test(f) && /VisitorReview/i.test(where) && v >= 0) count = v;
+          } else if (typeof v === "string") {
+            if (!booking && /^https?:\/\/[^ ]*booking\.naver\.com/.test(v)) booking = v;
+          } else if (v === true && !booking && /^(hasBooking|isBooking|bookingAvailable|hasNaverBooking)$/i.test(f)) booking = "tab";
+        }
+      }
+    }
+    if (!booking) {
+      var as = document.querySelectorAll("a[href]");
+      for (var i = 0; i < as.length && !booking; i++) {
+        var h = as[i].getAttribute("href") || "", t = str(as[i].innerText).trim();
+        if (/booking\.naver\.com/.test(h)) booking = h.indexOf("http") === 0 ? h : "https:" + h;
+        else if (/\/booking(\?|\/|$)/.test(h) && /예약/.test(t)) booking = "tab";
+      }
+    }
+    if (!booking) {
+      var tabs = document.querySelectorAll("[role=tab], a[role=tab]");
+      for (var j = 0; j < tabs.length && !booking; j++) if (str(tabs[j].innerText).trim() === "예약") booking = "tab";
+    }
+    if (rating == null) {
+      var m = str(document.body && document.body.innerText).match(/별점\s*([0-5]\.\d{1,2})/);
+      if (m) rating = Number(m[1]);
+    }
+    return { stats: { rating: rating, count: count }, booking: booking };
+  }
+
   var tries = 0;
   var timer = setInterval(function () {
     tries++;
@@ -119,7 +163,9 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
     if (!r.length && tries > 3) { try { r = fromDom(); if (r.length) how = "dom"; } catch (e) {} }
     if (r.length || tries > 30) {
       clearInterval(timer);
-      var msg = JSON.stringify({ type: "naverReviews", how: how, reviews: r.slice(0, 20), url: location.href, title: document.title });
+      var ex = { stats: { rating: null, count: null }, booking: null };
+      try { ex = extras(); } catch (e) {}
+      var msg = JSON.stringify({ type: "naverReviews", how: how, reviews: r.slice(0, 20), stats: ex.stats, booking: ex.booking, url: location.href, title: document.title });
       window.__naverReviews = msg;
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(msg);
     }

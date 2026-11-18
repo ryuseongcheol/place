@@ -104,7 +104,7 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
           </Text>
           {!isPhotos ? (
             <Pressable onPress={() => Linking.openURL(currentUrl ?? uri ?? "")} hitSlop={12} accessibilityLabel="외부 브라우저로 열기" style={styles.barBtn}>
-              <Text style={{ fontSize: 13, color: c.muted }}>브라우저</Text>
+              <Text style={{ fontSize: 20, color: c.muted }}>↗</Text>
             </Pressable>
           ) : (
             <View style={styles.barBtn} />

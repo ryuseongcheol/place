@@ -46,6 +46,7 @@ http://localhost:3000 접속. 휴대폰에서 위치를 쓰려면 HTTPS가 필�
 | `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 선택 | 네이버 개발자센터 검색 API (**2026-07-31 신규 발급 종료**, 기존 키만) | 위와 같음. HUB 키가 있으면 HUB를 우선 사용 |
 | `ANTHROPIC_API_KEY` | 선택 | [Claude Console](https://console.anthropic.com) | 자유 입력 해석, 리뷰 기반 재정렬·추천 이유 |
 | `CLAUDE_MODEL` | 선택 | | 기본 `claude-opus-5-5`. 비용을 줄이려면 `claude-haiku-5-5` 등 |
+| `GOOGLE_PLACES_API_KEY` | 선택 | [Google Cloud Console](https://console.cloud.google.com) > API 및 서비스 > **Places API (New)** 사용 설정 > 사용자 인증 정보 > API 키 (결제 계정 필요, 키는 Places API (New)만 쓰도록 제한 권장) | 식당 상세의 구글 별점·리뷰 수와 구글 리뷰 화면 링크. 없으면 구글 지도 검색으로 연결. 결과는 14일 기억 |
 | `UNOFFICIAL_REVIEWS` | | | `0`이면 비공식 리뷰 수집 끔 |
 | `SUBREQUEST_BUDGET` | | | 요청 한 번에 쓸 외부 호출 수. 기본 48 (Cloudflare 무료 플랜 한도 50). 유료 플랜이면 `500` 등으로 올리면 검색 페이지·리뷰 조회 수가 늘어남 |
 | KV 바인딩 `DATA` | 야간 수집 시 | Cloudflare > Storage & Databases > KV 생성 후 `wrangler.jsonc`의 `kv_namespaces` | 앱이 고른 지역 목록 저장 |

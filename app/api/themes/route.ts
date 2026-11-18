@@ -20,6 +20,7 @@ export function GET() {
       naverHub: Boolean(process.env.NAVER_HUB_CLIENT_ID && process.env.NAVER_HUB_CLIENT_SECRET),
       naverLegacy: Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET),
       anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+      google: Boolean(process.env.GOOGLE_PLACES_API_KEY),
       db: getDb() !== null,
     },
   });

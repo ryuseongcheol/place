@@ -116,9 +116,11 @@ export function mockDetail(id: string, name: string): PlaceDetail {
       naverPlace: `https://m.map.naver.com/search2/search.naver?query=${q}`,
       naverVisitorReviews: `https://m.search.naver.com/search.naver?query=${q}`,
       naverBlogReviews: `https://m.search.naver.com/search.naver?where=m_blog&query=${q}`,
+      googleReviews: `https://www.google.com/maps/search/?api=1&query=${q}`,
     },
     sources: { kakaoDetail: "mock", naverBlog: "mock", naverImage: "mock" },
     shows: Number(id.replace("mock-", "")) % 4 === 0 ? ["wednesday", "meokeultende"] : [],
+    google: { rating: 4.5, count: 89, url: `https://www.google.com/maps/search/?api=1&query=${q}` },
   };
 }
 

@@ -6,6 +6,8 @@ import { useMyNotes } from "./myNotes";
 import { MAX_MY_PHOTOS, deletePhotoFile, pickFromLibrary, takePhoto } from "./myPhotos";
 import MyVisits from "./MyVisits";
 import NaverReviews from "./NaverReviews";
+import { useNaverPlace } from "./naverPlace";
+import { NaverBookingRow, ReviewTiles } from "./ReviewLinks";
 import PhotoViewer from "./PhotoViewer";
 import { lookupNaverPlace, naverBookingUrl, naverMapSearchUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
 import { mergeShows, shortArea } from "./shared";
@@ -91,18 +93,14 @@ function dongOf(address: string) {
 /** 시트 본문: 액션 버튼, 사진, 추천 이유, 정보, 메뉴, 리뷰, 블로그 리뷰 */
 export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: BodyProps) {
   const [findingNaver, setFindingNaver] = useState(false);
-  const [findingBooking, setFindingBooking] = useState(false);
+  // 네이버: 장소 id·리뷰 수·예약 여부·방문자 리뷰 본문 (보이지 않는 웹뷰로 리뷰 페이지를 읽는다)
+  const nv = useNaverPlace(p);
 
-  // 네이버 예약: 앱 안 웹뷰에서 예약까지 (네이버 로그인은 한 번 하면 유지)
-  const openBooking = async () => {
-    const title = `${p.name} 예약`;
-    setFindingBooking(true);
-    const info = await lookupNaverPlace(p).catch(() => null);
-    setFindingBooking(false);
-    const naverId = info?.id ?? p.naver?.naverId ?? null;
-    if (naverId) openWeb({ title, url: naverBookingUrl(naverId, info?.bookingUrl) });
-    else openWeb({ title, url: naverMapSearchUrl(p.name, dongOf(p.address)), naverToBooking: true });
+  // 네이버 예약: 예약을 받는 곳만 표시, 앱 안 웹뷰에서 예약까지 (네이버 로그인은 한 번 하면 유지)
+  const openBooking = () => {
+    if (nv.bookingUrl) openWeb({ title: `${p.name} 네이버 예약`, url: nv.bookingUrl });
   };
+
   // 카드 목록에서 이미 받아 둔 상세가 있으면 바로 보여준다
   const { detail, loading, error } = useDetail(p);
   const [showAllMenus, setShowAllMenus] = useState(false);
@@ -118,8 +116,8 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
   // 네이버 방문자 리뷰: 장소 id를 알면 리뷰 탭으로 바로, 모르면 폰에서 찾아보고, 그래도 없으면
   // 네이버 지도 검색을 열되 가게를 누르는 순간 리뷰 탭으로 보낸다 (블로그 검색 결과로 가지 않게)
   const openNaverReviews = async () => {
-    const title = `${p.name} 방문자 리뷰`;
-    let naverId = p.naver?.naverId ?? null;
+    const title = "네이버 방문자 리뷰";
+    let naverId = nv.naverId ?? p.naver?.naverId ?? null;
     if (!naverId) {
       setFindingNaver(true);
       naverId = await resolveNaverPlaceId(p).catch(() => null);
@@ -135,10 +133,15 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
       <View style={[styles.actions, { borderColor: c.line }]}>
         <Action c={c} icon={isFavorite ? "★" : "☆"} label={isFavorite ? "저장됨" : "저장"} active={isFavorite} onPress={onSave} />
         <Action c={c} icon="➜" label="길찾기" onPress={() => openNaverMap(p)} />
-        <Action c={c} icon={findingBooking ? "…" : "📅"} label="예약" onPress={openBooking} disabled={findingBooking} />
         <Action c={c} icon="☎" label="전화" disabled={!p.phone} onPress={() => p.phone && callPhone(p.phone)} />
         <Action c={c} icon="K" label="카카오맵" onPress={() => openKakaoMap(p)} />
       </View>
+
+      {/* 보이지 않는 웹뷰: 네이버 리뷰 페이지 읽기 */}
+      {nv.probe}
+
+      {/* 네이버 예약 (예약을 받는 곳에만) */}
+      {nv.bookingUrl && <NaverBookingRow onPress={openBooking} colors={c} />}
 
       {/* 상세에서 새로 확인된 방송·가이드 출연 (목록에는 없던 것) */}
       {detail && mergeShows(detail.shows).filter((s) => !(p.shows ?? []).includes(s)).length > 0 && (
@@ -229,26 +232,72 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
       {/* 리뷰 (네이버 리뷰는 상세를 기다리지 않고 바로 불러온다) */}
       {(
         <Section c={c} title="리뷰">
-          {/* 네이버 방문자 리뷰: 요약 상자 + 본문 (보이지 않는 웹뷰로 뽑아 옴) */}
-          <Pressable
-            style={[styles.sourceCard, { backgroundColor: c.naverBg }]}
-            onPress={openNaverReviews}
-            disabled={findingNaver}
-            accessibilityRole="link"
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: c.naver }}>
-                네이버 방문자 리뷰 {p.naver?.visitorReviewCount ? p.naver.visitorReviewCount.toLocaleString() : ""}
-              </Text>
-              {!!p.naver?.keywords.length && (
-                <Text style={{ fontSize: 12, color: c.naver, marginTop: 4 }} numberOfLines={2}>
-                  {p.naver.keywords.map((k) => `"${k}"`).join("  ")}
-                </Text>
-              )}
-            </View>
-            {findingNaver ? <ActivityIndicator color={c.naver} /> : <Text style={{ color: c.naver, fontSize: 13, fontWeight: "600" }}>보기 ›</Text>}
-          </Pressable>
-          <NaverReviews place={p} colors={c} openWeb={openWeb} />
+          {/* 리뷰 출처 4칸: 누르면 각 리뷰 화면 (앱 안 팝업) */}
+          <ReviewTiles
+            colors={c}
+            tiles={[
+              {
+                key: "naver",
+                badge: { kind: "naver" },
+                label: "방문자",
+                count: nv.visitorCount,
+                rating: nv.rating,
+                loading: nv.status === "loading" || nv.status === "finding",
+                onPress: openNaverReviews,
+              },
+              {
+                key: "kakao",
+                badge: { kind: "kakao" },
+                label: "후기",
+                count: p.kakao ? p.kakao.reviewCount || p.kakao.ratingCount || null : null,
+                rating: p.kakao?.rating ?? null,
+                onPress: () =>
+                  openWeb({
+                    title: "카카오맵 후기",
+                    url: detail?.links.kakaoReviews ?? (/^\d+$/.test(p.id) ? `https://place.map.kakao.com/${p.id}#comment` : p.kakaoUrl),
+                  }),
+              },
+              {
+                key: "google",
+                badge: { kind: "google" },
+                label: "리뷰",
+                count: detail?.google?.count ?? null,
+                rating: detail?.google?.rating ?? null,
+                loading: !detail,
+                onPress: () =>
+                  openWeb({
+                    title: "구글 리뷰",
+                    url:
+                      detail?.google?.url ??
+                      detail?.links.googleReviews ??
+                      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.roadAddress || p.address}`)}`,
+                  }),
+              },
+              {
+                key: "blog",
+                badge: { kind: "naverBlog" },
+                label: "블로그",
+                count: nv.blogCount ?? detail?.blogReviewTotal ?? null,
+                rating: null,
+                onPress: () =>
+                  openWeb({
+                    title: "네이버 블로그 리뷰",
+                    url: nv.naverId
+                      ? `https://m.place.naver.com/restaurant/${nv.naverId}/review/ugc`
+                      : (detail?.links.naverBlogReviews ?? `https://m.search.naver.com/search.naver?where=m_blog&query=${encodeURIComponent(p.name)}`),
+                  }),
+              },
+            ]}
+          />
+
+          {/* 네이버 방문자 리뷰 본문 */}
+          <View style={[styles.subHead]}>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: c.text }}>
+              네이버 방문자 리뷰{nv.rating != null ? <Text style={{ fontWeight: "400" }}>{"  "}<Text style={{ color: "#F5A400" }}>★</Text> {nv.rating.toFixed(2)}</Text> : null}
+            </Text>
+          </View>
+          <NaverReviews placeName={p.name} status={nv.status} reviews={nv.reviews} colors={c} openWeb={openWeb} />
+          {nv.reviews.length > 0 && <MoreButton c={c} label="네이버에서 방문자 리뷰 전체 보기 ›" onPress={openNaverReviews} />}
 
           {detail && (<>
           {/* 카카오맵 후기 */}
