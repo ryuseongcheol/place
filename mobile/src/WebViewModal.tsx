@@ -19,6 +19,8 @@ export type WebTarget =
       naverToReviews?: boolean;
       /** 네이버 검색 결과에서 가게를 누르면 그 가게의 예약 탭으로 바로 보낸다 */
       naverToBooking?: boolean;
+      /** 페이지가 열리면 이 글자의 탭을 한 번 눌러 준다 (예: "방문자 리뷰", "블로그 리뷰") */
+      clickText?: string;
     }
   | { title: string; photos: string[]; index: number };
 
@@ -62,6 +64,30 @@ var g=document.getElementById('g'),c=document.getElementById('c');
 requestAnimationFrame(function(){g.scrollLeft=g.clientWidth*${index};});
 g.addEventListener('scroll',function(){c.textContent=(Math.round(g.scrollLeft/g.clientWidth)+1)+' / ${photos.length}';});
 </script></body></html>`;
+}
+
+/** 페이지 안에서 원하는 탭(글자)을 찾아 한 번 누르기. 이미 골라져 있으면 그대로 */
+function clickTabJs(text: string) {
+  return `(function () {
+  if (window.__tabClicked) return;
+  var want = ${JSON.stringify(text)}, n = 0;
+  var t = setInterval(function () {
+    n++;
+    var best = null, bestLen = 1e9;
+    var els = document.querySelectorAll('a, button, [role="tab"], span, div');
+    for (var i = 0; i < els.length; i++) {
+      var tx = (els[i].innerText || "").replace(/\s+/g, " ").trim();
+      if ((tx === want || (tx.slice(-want.length) === want && tx.length <= want.length + 6)) && tx.length < bestLen) { best = els[i]; bestLen = tx.length; }
+    }
+    if (best) {
+      clearInterval(t);
+      window.__tabClicked = true;
+      var el = best.closest('a, button, [role="tab"]') || best;
+      if (el.getAttribute('aria-selected') !== 'true') el.click();
+    } else if (n > 25) clearInterval(t);
+  }, 300);
+})();
+true;`;
 }
 
 const NAVER_PLACE = /^https?:\/\/(m\.)?place\.naver\.com\/(restaurant|place|cafe|hairshop|accommodation)\/(\d+)(\/home)?(\?.*)?$/;
@@ -143,6 +169,7 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
                 }
                 return true;
               }}
+              injectedJavaScript={"clickText" in target && target.clickText ? clickTabJs(target.clickText) : undefined}
               // 네이버 로그인 유지 (예약에 필요)
               sharedCookiesEnabled
               thirdPartyCookiesEnabled

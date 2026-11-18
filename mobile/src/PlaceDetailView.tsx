@@ -9,7 +9,7 @@ import NaverReviews from "./NaverReviews";
 import { useNaverPlace } from "./naverPlace";
 import { NaverBookingRow, ReviewTiles } from "./ReviewLinks";
 import PhotoViewer from "./PhotoViewer";
-import { lookupNaverPlace, naverBookingUrl, naverMapSearchUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
+import { NAVER_REVIEW_TAB_TEXT, lookupNaverPlace, naverBookingUrl, naverMapSearchUrl, naverReviewUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
 import { mergeShows, shortArea } from "./shared";
 import ShowBadges from "./ShowBadges";
 import { callPhone, openKakaoMap, openNaverMap } from "./openMap";
@@ -123,8 +123,8 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
       naverId = await resolveNaverPlaceId(p).catch(() => null);
       setFindingNaver(false);
     }
-    if (naverId) openWeb({ title, url: naverVisitorReviewUrl(naverId, `${dongOf(p.address) ?? ""} ${p.name}`) });
-    else openWeb({ title, url: naverMapSearchUrl(p.name, dongOf(p.address)), naverToReviews: true });
+    if (naverId) openWeb({ title, url: naverVisitorReviewUrl(naverId, `${dongOf(p.address) ?? ""} ${p.name}`), clickText: NAVER_REVIEW_TAB_TEXT.visitor });
+    else openWeb({ title, url: naverMapSearchUrl(p.name, dongOf(p.address)), naverToReviews: true, clickText: NAVER_REVIEW_TAB_TEXT.visitor });
   };
 
   return (
@@ -280,12 +280,16 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                 count: nv.blogCount ?? detail?.blogReviewTotal ?? null,
                 rating: null,
                 onPress: () =>
-                  openWeb({
-                    title: "네이버 블로그 리뷰",
-                    url: nv.naverId
-                      ? `https://m.place.naver.com/restaurant/${nv.naverId}/review/ugc`
-                      : (detail?.links.naverBlogReviews ?? `https://m.search.naver.com/search.naver?where=m_blog&query=${encodeURIComponent(p.name)}`),
-                  }),
+                  nv.naverId
+                    ? openWeb({
+                        title: "네이버 블로그 리뷰",
+                        url: naverReviewUrl(nv.naverId, "blog", `${dongOf(p.address) ?? ""} ${p.name}`),
+                        clickText: NAVER_REVIEW_TAB_TEXT.blog,
+                      })
+                    : openWeb({
+                        title: "네이버 블로그 리뷰",
+                        url: detail?.links.naverBlogReviews ?? `https://m.search.naver.com/search.naver?where=m_blog&query=${encodeURIComponent(p.name)}`,
+                      }),
               },
             ]}
           />

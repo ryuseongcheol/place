@@ -98,13 +98,19 @@ export async function lookupNaverPlace(p: { id: string; name: string; lat: numbe
 }
 
 /**
- * 방문자 리뷰 화면 (네이버 플레이스 리뷰 탭, 사진으로 보기).
- * 직접 고른 링크 형식: /review/ugc?abtExp=…&query=동+가게이름&type=photoView
+ * 네이버 플레이스 리뷰 탭 (사진으로 보기). 직접 고른 링크 형식을 따른다:
+ *   /review/ugc?abtExp=…&query=동+가게이름&type=photoView
+ * 리뷰 탭 안에 "방문자 리뷰"·"블로그 리뷰" 두 탭이 있어서, 주소(visitor/ugc)로 고르고
+ * 웹뷰가 열린 뒤 그 탭을 한 번 눌러 준다 (NAVER_REVIEW_TAB_TEXT, WebViewModal 의 clickText)
  */
 export const NAVER_REVIEW_ABT = "N-NMB-COV-26-MED:1";
-export function naverVisitorReviewUrl(naverId: string, query?: string | null) {
+export const NAVER_REVIEW_TAB_TEXT = { visitor: "방문자 리뷰", blog: "블로그 리뷰" } as const;
+export function naverReviewUrl(naverId: string, tab: "visitor" | "blog", query?: string | null) {
   const q = query?.trim() ? `&query=${encodeURIComponent(query.trim())}` : "";
-  return `https://m.place.naver.com/restaurant/${naverId}/review/ugc?abtExp=${encodeURIComponent(NAVER_REVIEW_ABT)}${q}&type=photoView`;
+  return `https://m.place.naver.com/restaurant/${naverId}/review/${tab === "blog" ? "ugc" : "visitor"}?abtExp=${encodeURIComponent(NAVER_REVIEW_ABT)}${q}&type=photoView`;
+}
+export function naverVisitorReviewUrl(naverId: string, query?: string | null) {
+  return naverReviewUrl(naverId, "visitor", query);
 }
 
 /** 장소 id를 못 찾았을 때: 네이버 지도 모바일 검색 (웹뷰에서 가게를 누르면 리뷰 탭으로 보낸다) */
