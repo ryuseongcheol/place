@@ -448,7 +448,13 @@ function MapScreen() {
           setFavGroupId(gid);
           setLayer("favorites");
           setSheet({ mode: "favList", groupId: gid });
-          sheetRef.current?.scrollToTop();
+          // 저장 리스트도 지도 아래 카드로 (빈 리스트면 목록 화면 그대로)
+          if (fav.placesIn(gid).length > 0) {
+            cardPlaceId.current = null;
+            setCardIndex(0);
+            setCardsOpen(true);
+            setSnap("closed");
+          } else sheetRef.current?.scrollToTop();
         }}
       />
     );
@@ -610,7 +616,9 @@ function MapScreen() {
               accessibilityLabel="리스트로 보기"
             >
               <Text style={{ fontSize: 15, color: c.accent, fontWeight: "800" }}>☰</Text>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: c.text }}>리스트로 보기</Text>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: c.text, maxWidth: 170 }} numberOfLines={1}>
+                {layer === "favorites" ? `${favGroupId ? (fav.groups.find((g) => g.id === favGroupId)?.name ?? "저장") : "전체"} 목록` : "리스트로 보기"}
+              </Text>
               <Text style={{ fontSize: 13, color: c.muted }}>{`${cardIndex + 1}/${listPlaces.length}`}</Text>
             </Pressable>
             <View style={{ flex: 1 }} />
