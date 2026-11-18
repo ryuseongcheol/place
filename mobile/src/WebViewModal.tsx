@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView as RNWebView, type WebViewNavigation, type WebViewProps } from "react-native-webview";
+import { naverVisitorReviewUrl } from "./naverDevice";
 import type { Colors } from "./theme";
 
 // react-native-webview 타입 정의가 제네릭 기본값(undefined) 때문에 props가 never로 잡혀서 명시적으로 지정
@@ -136,7 +137,7 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
                   const m = req.url.match(NAVER_PLACE) ?? req.url.match(NAVER_PCMAP);
                   const id = m ? (m[3] ?? m[2]) : null;
                   if (id && /^\d+$/.test(id)) {
-                    setUri(`https://m.place.naver.com/restaurant/${id}/${toBooking ? "booking" : "review/visitor"}`);
+                    setUri(toBooking ? `https://m.place.naver.com/restaurant/${id}/booking` : naverVisitorReviewUrl(id, target.title.replace(/ 방문자 리뷰$|^네이버 방문자 리뷰$/, "")));
                     return false;
                   }
                 }

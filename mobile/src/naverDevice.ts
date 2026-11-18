@@ -97,8 +97,14 @@ export async function lookupNaverPlace(p: { id: string; name: string; lat: numbe
   }
 }
 
-export function naverVisitorReviewUrl(naverId: string) {
-  return `https://m.place.naver.com/restaurant/${naverId}/review/visitor`;
+/**
+ * 방문자 리뷰 화면 (네이버 플레이스 리뷰 탭, 사진으로 보기).
+ * 직접 고른 링크 형식: /review/ugc?abtExp=…&query=동+가게이름&type=photoView
+ */
+export const NAVER_REVIEW_ABT = "N-NMB-COV-26-MED:1";
+export function naverVisitorReviewUrl(naverId: string, query?: string | null) {
+  const q = query?.trim() ? `&query=${encodeURIComponent(query.trim())}` : "";
+  return `https://m.place.naver.com/restaurant/${naverId}/review/ugc?abtExp=${encodeURIComponent(NAVER_REVIEW_ABT)}${q}&type=photoView`;
 }
 
 /** 장소 id를 못 찾았을 때: 네이버 지도 모바일 검색 (웹뷰에서 가게를 누르면 리뷰 탭으로 보낸다) */

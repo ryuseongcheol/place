@@ -123,7 +123,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
       naverId = await resolveNaverPlaceId(p).catch(() => null);
       setFindingNaver(false);
     }
-    if (naverId) openWeb({ title, url: naverVisitorReviewUrl(naverId) });
+    if (naverId) openWeb({ title, url: naverVisitorReviewUrl(naverId, `${dongOf(p.address) ?? ""} ${p.name}`) });
     else openWeb({ title, url: naverMapSearchUrl(p.name, dongOf(p.address)), naverToReviews: true });
   };
 
