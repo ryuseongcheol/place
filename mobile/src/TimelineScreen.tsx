@@ -44,6 +44,8 @@ interface PlaceSummary {
   total: number;
   lastAt: number;
   note: MyNote | null;
+  /** 자주 먹은 메뉴 (많이 먹은 순) */
+  menus: string[];
 }
 
 const paid = (p: PaymentRecord) => (p.canceled ? 0 : p.amount);
@@ -150,7 +152,7 @@ export default function TimelineScreen({ visible, onClose, onOpenPlace, colors: 
     const get = (id: string, place: PlaceSnap | null, name: string) => {
       let s = m.get(id);
       if (!s) {
-        s = { key: id, place, name, category: place?.category ?? "", visits: 0, total: 0, lastAt: 0, note: null };
+        s = { key: id, place, name, category: place?.category ?? "", visits: 0, total: 0, lastAt: 0, note: null, menus: [] };
         m.set(id, s);
       }
       if (!s.place && place) {
@@ -164,6 +166,7 @@ export default function TimelineScreen({ visible, onClose, onOpenPlace, colors: 
       for (const p of list) {
         if (p.status !== "matched" || !p.place || p.hidden) continue;
         const s = get(p.place.id, p.place, p.place.name);
+        if (!p.canceled) for (const m of p.menus ?? []) s.menus.push(m);
         s.total += paid(p);
         s.lastAt = Math.max(s.lastAt, p.at);
         if (!p.canceled) {
@@ -180,6 +183,11 @@ export default function TimelineScreen({ visible, onClose, onOpenPlace, colors: 
         s.note = n;
         s.lastAt = Math.max(s.lastAt, n.updatedAt);
       }
+    }
+    for (const s of m.values()) {
+      const cnt = new Map<string, number>();
+      for (const x of s.menus) cnt.set(x, (cnt.get(x) ?? 0) + 1);
+      s.menus = [...cnt.entries()].sort((a, b) => b[1] - a[1]).map(([x, n]) => (n > 1 ? `${x}×${n}` : x));
     }
     return [...m.values()].sort((a, b) => b.lastAt - a.lastAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -348,6 +356,11 @@ export default function TimelineScreen({ visible, onClose, onOpenPlace, colors: 
           <Text style={{ fontSize: 13, color: c.muted, marginTop: 3 }} numberOfLines={1}>
             {[s.visits ? `방문 ${s.visits}회` : null, s.total ? won(s.total) : null, s.lastAt ? `마지막 ${shortDate(s.lastAt)}` : null].filter(Boolean).join(" · ")}
           </Text>
+          {s.menus.length > 0 && (
+            <Text style={{ fontSize: 12, color: c.text, marginTop: 3 }} numberOfLines={1}>
+              🍽 {s.menus.slice(0, 4).join(", ")}
+            </Text>
+          )}
           {(s.note?.rating || s.note?.memo || s.note?.photos?.length) ? (
             <Text style={{ fontSize: 13, color: c.text, marginTop: 3 }} numberOfLines={1}>
               {s.note?.rating ? <Text style={{ color: "#F5A400", fontWeight: "700" }}>{`★${s.note.rating} `}</Text> : null}
@@ -488,6 +501,7 @@ export default function TimelineScreen({ visible, onClose, onOpenPlace, colors: 
 
 function PayLine({ p, c, onEdit }: { p: PaymentRecord; c: Colors; onEdit?: () => void }) {
   return (
+    <View>
     <View style={styles.payLine}>
       <MaterialCommunityIcons name={p.manual ? "pencil-outline" : "credit-card-outline"} size={14} color={c.muted} />
       <Text style={{ fontSize: 13, color: p.canceled ? c.muted : c.text, textDecorationLine: p.canceled ? "line-through" : "none" }}>
@@ -503,6 +517,12 @@ function PayLine({ p, c, onEdit }: { p: PaymentRecord; c: Colors; onEdit?: () =>
           <Text style={{ fontSize: 12, color: c.muted, textDecorationLine: "underline" }}>장소 변경</Text>
         </Pressable>
       )}
+    </View>
+    {p.menus?.length ? (
+      <Text style={[styles.payMenus, { color: c.text }]} numberOfLines={2}>
+        🍽 {p.menus.join(", ")}
+      </Text>
+    ) : null}
     </View>
   );
 }
@@ -690,6 +710,7 @@ const styles = StyleSheet.create({
   card: { marginHorizontal: 16, marginBottom: 8, borderWidth: 1, borderRadius: 12, padding: 12 },
   cardTop: { flexDirection: "row", alignItems: "center", gap: 10 },
   icon: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  payMenus: { fontSize: 12, marginTop: 3, paddingLeft: 62 },
   payLine: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, paddingLeft: 42 },
   cardActions: { flexDirection: "row", gap: 16, marginTop: 10, paddingLeft: 42 },
   photos: { flexDirection: "row", gap: 6, marginTop: 8 },

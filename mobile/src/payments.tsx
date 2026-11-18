@@ -44,6 +44,8 @@ export interface PaymentRecord {
   userFixed?: boolean;
   /** 서버가 찾은 후보 장소 (장소 바꾸기에서 보여줌) */
   candidates?: Array<PlaceSnap & { distance: number | null }>;
+  /** 먹은 메뉴 (선택, 직접 입력) */
+  menus?: string[];
 }
 
 const KEY = "payments:v1";
@@ -374,9 +376,9 @@ export function syncResultText(r: SyncResult): string {
   return parts.join(" · ") + (r.serverError ? `\n서버: ${r.serverError}` : "");
 }
 
-export function addManualPayment(place: PlaceSnap, amount: number, at: number) {
+export function addManualPayment(place: PlaceSnap, amount: number, at: number, menus: string[] = []) {
   return mutate((list) => {
-    list.push({ id: `manual:${at}:${place.id}`, at, amount, merchant: place.name, sources: ["직접 입력"], status: "matched", place, manual: true });
+    list.push({ id: `manual:${at}:${place.id}`, at, amount, merchant: place.name, sources: ["직접 입력"], status: "matched", place, manual: true, ...(menus.length ? { menus } : {}) });
   });
 }
 
