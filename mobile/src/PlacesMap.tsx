@@ -65,13 +65,15 @@ const PlacesMap = forwardRef<PlacesMapRef, Props>(function PlacesMap(
       longitude: minLng - padLng,
       latitudeDelta: maxLat - minLat + padLat * 2,
       longitudeDelta: maxLng - minLng + padLng * 2,
-      duration: 450,
+      duration: 600,
+      easing: "EaseOut",
     });
   };
 
   useImperativeHandle(ref, () => ({
-    focus: (lat, lng, zoom = 16) => mapRef.current?.animateCameraTo({ latitude: lat, longitude: lng, zoom, duration: 350 }),
-    pan: (lat, lng) => mapRef.current?.animateCameraTo({ latitude: lat, longitude: lng, duration: 300 }),
+    // 부드럽게 감속하며 이동 (너무 짧으면 툭 끊겨 보인다)
+    focus: (lat, lng, zoom = 16) => mapRef.current?.animateCameraTo({ latitude: lat, longitude: lng, zoom, duration: 600, easing: "EaseOut" }),
+    pan: (lat, lng) => mapRef.current?.animateCameraTo({ latitude: lat, longitude: lng, duration: 550, easing: "EaseOut" }),
     fitAll,
   }));
 

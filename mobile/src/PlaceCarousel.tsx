@@ -39,8 +39,15 @@ const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel
   const listRef = useRef<FlatList<ScoredPlace>>(null);
   const shown = useRef(index);
 
+  /** 코드로 넘기는 중인 목적지 카드 (지나가는 카드마다 지도가 따라 움직이지 않게, 도착할 때까지 중간 위치는 무시) */
+  const target = useRef<number | null>(null);
+  const targetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollTo = (i: number, animated = true) => {
     shown.current = i;
+    target.current = animated ? i : null;
+    if (targetTimer.current) clearTimeout(targetTimer.current);
+    // 끝까지 못 가는 경우(목록 끝 등)에도 풀리게
+    if (animated) targetTimer.current = setTimeout(() => (target.current = null), 900);
     listRef.current?.scrollToOffset({ offset: i * step, animated });
   };
   useImperativeHandle(ref, () => ({ scrollTo }));
@@ -54,9 +61,14 @@ const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (settle.current) clearTimeout(settle.current);
+    if (targetTimer.current) clearTimeout(targetTimer.current);
   }, []);
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset.x;
+    if (target.current !== null) {
+      if (Math.abs(x - target.current * step) < 2) target.current = null;
+      return;
+    }
     const i = Math.max(0, Math.min(places.length - 1, Math.round(x / step)));
     if (i !== shown.current) {
       shown.current = i;
@@ -84,6 +96,7 @@ const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel
       getItemLayout={(_, i) => ({ length: step, offset: step * i, index: i })}
       initialScrollIndex={Math.min(index, Math.max(0, places.length - 1))}
       onScroll={onScroll}
+      onScrollBeginDrag={() => (target.current = null)}
       scrollEventThrottle={32}
       windowSize={5}
       renderItem={({ item, index: i }) => (

@@ -1,24 +1,35 @@
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { Image } from "expo-image";
 import { useEffect, useRef, useState } from "react";
 import { FlatList, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MenuItem } from "./types";
 
+/** 사진 없는 메뉴의 기본 배경 */
+export interface MenuFallback {
+  /** 가게 대표 사진 (흐리게 깔아 둔다). 없으면 단색 */
+  image?: string | null;
+  /** 가게 종류 아이콘 (MaterialCommunityIcons 이름) */
+  glyph?: string | null;
+}
+
 /**
- * 메뉴 사진 크게 보기: 사진을 배경(흐리게 꽉 채움) + 가운데 원본 사진, 아래에 메뉴 이름·가격.
- * 좌우로 넘기거나 ‹ › 버튼으로 이전·다음 메뉴. 사진 있는 메뉴만 넘긴다.
+ * 메뉴 크게 보기: 사진을 배경(흐리게 꽉 채움) + 가운데 원본 사진, 아래에 메뉴 이름·가격.
+ * 사진 없는 메뉴는 기본 배경(가게 사진을 흐리게, 없으면 단색) 위에 가게 종류 아이콘.
+ * 좌우로 넘기거나 ‹ › 버튼으로 이전·다음 메뉴.
  */
 export default function MenuPhotoViewer({
   menus,
   index,
   placeName,
+  fallback,
   onClose,
 }: {
-  /** 사진이 있는 메뉴만 */
   menus: MenuItem[];
   /** 열 메뉴 (null 이면 닫힘) */
   index: number | null;
   placeName: string;
+  fallback?: MenuFallback;
   onClose: () => void;
 }) {
   const { width, height } = useWindowDimensions();
@@ -56,7 +67,7 @@ export default function MenuPhotoViewer({
           onMomentumScrollEnd={onScrollEnd}
           onScrollEndDrag={onScrollEnd}
           windowSize={3}
-          renderItem={({ item }) => <Slide item={item} width={width} height={height} top={insets.top} bottom={insets.bottom} />}
+          renderItem={({ item }) => <Slide item={item} fallback={fallback} width={width} height={height} top={insets.top} bottom={insets.bottom} />}
         />
 
         {/* 위: 닫기 · 가게 이름 · n/N */}
@@ -90,26 +101,26 @@ export default function MenuPhotoViewer({
   );
 }
 
-function Slide({ item, width, height, top, bottom }: { item: MenuItem; width: number; height: number; top: number; bottom: number }) {
+function Slide({ item, fallback, width, height, top, bottom }: { item: MenuItem; fallback?: MenuFallback; width: number; height: number; top: number; bottom: number }) {
   const [failed, setFailed] = useState(false);
+  const [bgFailed, setBgFailed] = useState(false);
+  const photo = item.image && !failed ? item.image : null;
+  // 배경: 메뉴 사진, 없으면 가게 대표 사진 (둘 다 흐리게 꽉 채움), 그것도 없으면 단색
+  const bg = photo ?? (fallback?.image && !bgFailed ? fallback.image : null);
+  const area = { position: "absolute" as const, left: 0, right: 0, top: top + 64, bottom: bottom + 150 };
   return (
-    <View style={{ width, height }}>
-      {/* 배경: 같은 사진을 흐리게 꽉 채움 */}
-      {item.image && !failed && <Image source={{ uri: item.image }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={28} />}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.45)" }]} />
-      {/* 가운데: 잘리지 않은 원본 */}
-      {item.image && !failed ? (
-        <Image
-          source={{ uri: item.image }}
-          style={{ position: "absolute", left: 0, right: 0, top: top + 64, bottom: bottom + 150 }}
-          contentFit="contain"
-          transition={150}
-          onError={() => setFailed(true)}
-          accessibilityLabel={`${item.name} 사진`}
-        />
+    <View style={{ width, height, backgroundColor: "#3B2A20" }}>
+      {bg && <Image source={{ uri: bg }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={photo ? 28 : 40} onError={() => !photo && setBgFailed(true)} />}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: photo ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.55)" }]} />
+      {/* 가운데: 잘리지 않은 원본, 사진이 없으면 기본 그림 */}
+      {photo ? (
+        <Image source={{ uri: photo }} style={area} contentFit="contain" transition={150} onError={() => setFailed(true)} accessibilityLabel={`${item.name} 사진`} />
       ) : (
-        <View style={[styles.noPhoto, { top: top + 64, bottom: bottom + 150 }]}>
-          <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 14 }}>사진을 불러오지 못했어요</Text>
+        <View style={[area, styles.noPhoto]}>
+          <View style={styles.placeholder}>
+            <MaterialCommunityIcons name={(fallback?.glyph ?? "silverware-fork-knife") as never} size={64} color="rgba(255,255,255,0.85)" />
+          </View>
+          <Text style={styles.placeholderText}>{item.image ? "사진을 불러오지 못했어요" : "사진이 없는 메뉴예요"}</Text>
         </View>
       )}
       {/* 아래: 메뉴 이름·가격 (사진 위에 어둡게 깔고) */}
@@ -139,7 +150,9 @@ const styles = StyleSheet.create({
   counterText: { color: "#fff", fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] },
   side: { position: "absolute", width: 44, height: 56, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center" },
   sideText: { color: "#fff", fontSize: 34, lineHeight: 38, marginTop: -4 },
-  noPhoto: { position: "absolute", left: 0, right: 0, alignItems: "center", justifyContent: "center" },
+  noPhoto: { alignItems: "center", justifyContent: "center" },
+  placeholder: { width: 132, height: 132, borderRadius: 66, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" },
+  placeholderText: { marginTop: 14, color: "rgba(255,255,255,0.75)", fontSize: 14 },
   caption: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 22, paddingTop: 72 },
   name: { color: "#fff", fontSize: 24, fontWeight: "800", letterSpacing: -0.4, lineHeight: 31 },
   price: { color: "#FFD166", fontSize: 19, fontWeight: "800", marginTop: 6 },

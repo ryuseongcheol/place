@@ -12,7 +12,7 @@ import { knownNaverId, naverQueryOf, useNaverPlace } from "./naverPlace";
 import { NaverBookingRow, ReviewTiles } from "./ReviewLinks";
 import PhotoViewer from "./PhotoViewer";
 import { NAVER_REVIEW_TAB_TEXT, naverReviewUrl, resolveNaverPlaceId } from "./naverDevice";
-import { mergeShows, naverPlaceSearchUrl, shortArea } from "./shared";
+import { categoryIcon, mergeShows, naverPlaceSearchUrl, shortArea } from "./shared";
 import ShowBadges from "./ShowBadges";
 import { callPhone, openKakaoMap, openNaverMap } from "./openMap";
 import type { Colors } from "./theme";
@@ -112,7 +112,8 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
   }, [p.id]);
 
   const links = detail?.links;
-  const photoMenus = useMemo(() => (detail?.menus ?? []).filter((m) => !!m.image), [detail]);
+  // 메뉴 크게 보기: 사진 없는 메뉴는 가게 대표 사진(흐리게)과 가게 종류 아이콘을 깔아 보여준다
+  const menuFallback = useMemo(() => ({ image: detail?.photos?.[0] ?? null, glyph: categoryIcon(p.category, p.name).glyph }), [detail, p.category, p.name]);
 
   // 네이버 리뷰(방문자·블로그): 장소 id를 알면 그 탭으로 바로. 모르면 폰에서 찾아보고, 그래도 없으면
   // 네이버 검색 화면을 가린 채 열어 이 가게를 자동으로 골라 리뷰 탭으로 넘어간다 (가게를 직접 누를 필요 없음)
@@ -142,7 +143,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
 
       {/* 보이지 않는 웹뷰: 네이버 리뷰 페이지 읽기 */}
       {nv.probe}
-      <MenuPhotoViewer menus={photoMenus} index={menuView} placeName={p.name} onClose={() => setMenuView(null)} />
+      <MenuPhotoViewer menus={detail?.menus ?? []} index={menuView} placeName={p.name} fallback={menuFallback} onClose={() => setMenuView(null)} />
 
       {/* 네이버 예약 (예약을 받는 곳에만) */}
       {nv.bookingUrl && <NaverBookingRow onPress={openBooking} colors={c} />}
@@ -217,15 +218,13 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
           ) : (
             <>
               {(showAllMenus ? detail.menus : detail.menus.slice(0, 5)).map((m) => {
-                const photoIndex = m.image ? photoMenus.indexOf(m) : -1;
                 return (
                   <Pressable
                     key={m.name}
-                    disabled={photoIndex < 0}
-                    onPress={() => setMenuView(photoIndex)}
+                    onPress={() => setMenuView(detail.menus.indexOf(m))}
                     style={({ pressed }) => [styles.menuRow, { borderBottomColor: c.line, opacity: pressed ? 0.6 : 1 }]}
-                    accessibilityRole={photoIndex >= 0 ? "button" : undefined}
-                    accessibilityHint={photoIndex >= 0 ? "메뉴 사진 크게 보기" : undefined}
+                    accessibilityRole="button"
+                    accessibilityHint="메뉴 크게 보기"
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 15, color: c.text }}>{m.name}</Text>
