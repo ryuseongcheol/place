@@ -74,17 +74,20 @@ g.addEventListener('scroll',function(){c.textContent=(Math.round(g.scrollLeft/g.
 }
 
 /**
- * 페이지 안에서 원하는 탭(글자)을 찾아 한 번 누르고 그 자리로 스크롤. 이미 골라져 있으면 스크롤만.
- * 탭 이름 옆 숫자는 무시한다 ("방문자 리뷰 632" = "방문자 리뷰"). 네이버 검색 화면에서는 누르지 않는다.
+ * 페이지 안에서 원하는 탭(글자)을 찾아 그 탭으로 옮기고 그 자리로 스크롤. 탭 이름 옆 숫자는 무시한다 ("방문자 리뷰 632").
+ * 네이버 플레이스: 탭이 링크면 누르지 않고 그 링크 주소로 바로 간다 (화면이 준비되기 전에 누르면 헛눌리기 때문).
+ *   이미 그 탭 주소면 그대로. 링크가 아니면 골라질 때까지 몇 번 다시 누른다.
+ * 그 밖의 사이트(구글 "웹사이트로 이동" 등): 한 번 누른다. 네이버 검색 화면에서는 아무것도 안 한다.
  */
 function clickTabJs(text: string | string[]) {
   const wants = Array.isArray(text) ? text : [text];
   return `(function () {
   if (window.__tabClicked || /(^|\\.)search\\.naver\\.com$|^(m\\.)?map\\.naver\\.com$/.test(location.hostname)) return;
+  window.__tabClicked = true;
+  var naver = /(^|\\.)place\\.naver\\.com$/.test(location.hostname);
   function norm(s) { return String(s || "").replace(/[\\s\\d,.+()]/g, ""); }
-  var wants = ${JSON.stringify(wants)}.map(norm), n = 0;
-  var t = setInterval(function () {
-    n++;
+  var wants = ${JSON.stringify(wants)}.map(norm), n = 0, clicks = 0;
+  function find() {
     var best = null, bestScore = 1e9;
     var els = document.querySelectorAll('[role="tab"], a, button, span, div');
     for (var i = 0; i < els.length; i++) {
@@ -92,19 +95,44 @@ function clickTabJs(text: string | string[]) {
       if (!raw || raw.length > 40) continue;
       var tx = norm(raw);
       for (var w = 0; w < wants.length; w++) {
-        if (tx !== wants[w]) continue;
+        var want = wants[w], extra = tx.length - want.length;
+        // 정확히 같으면 우선, "인증 방문자 리뷰"처럼 앞뒤에 몇 글자 붙은 것은 그다음
+        var near = tx === want ? 0 : extra > 0 && extra <= 4 && (tx.indexOf(want) === 0 || tx.slice(-want.length) === want) ? 50 : -1;
+        if (near < 0) continue;
         var el = els[i].closest('[role="tab"], a, button') || els[i];
         // 탭(role=tab) > 링크·버튼 > 글자 순으로, 같으면 글자가 짧은 것
-        var score = (el.getAttribute('role') === 'tab' ? 0 : el !== els[i] || /^(A|BUTTON)$/.test(els[i].tagName) ? 100 : 200) + raw.length;
+        var score = near + (el.getAttribute('role') === 'tab' ? 0 : el !== els[i] || /^(A|BUTTON)$/.test(els[i].tagName) ? 100 : 200) + raw.length;
         if (score < bestScore) { best = el; bestScore = score; }
       }
     }
-    if (best) {
+    return best;
+  }
+  function isOn(el) {
+    var a = el.getAttribute('aria-selected'), c = el.getAttribute('aria-current');
+    var cls = typeof el.className === 'string' ? el.className : '';
+    return a === 'true' || (c && c !== 'false') || /(^|[\\s_-])(selected|active|on|current)($|[\\s_-])/i.test(cls);
+  }
+  function scroll(el) { setTimeout(function () { try { el.scrollIntoView({ block: 'start' }); } catch (e) {} }, 500); }
+  var t = setInterval(function () {
+    n++;
+    var el = find();
+    if (!el) { if (n > 40) clearInterval(t); return; }
+    if (!naver) { clearInterval(t); el.click(); return; }
+    var a = el.tagName === 'A' ? el : el.closest('a');
+    var href = a ? a.getAttribute('href') || '' : '';
+    if (a && href && !/^(#|javascript:)/i.test(href)) {
       clearInterval(t);
-      window.__tabClicked = true;
-      if (best.getAttribute('aria-selected') !== 'true') best.click();
-      setTimeout(function () { try { best.scrollIntoView({ block: 'start' }); } catch (e) {} }, 500);
-    } else if (n > 40) clearInterval(t);
+      var u = new URL(a.href, location.href);
+      if (u.pathname.replace(/\\/$/, '') === location.pathname.replace(/\\/$/, '')) return scroll(el);
+      var k = 0;
+      try { k = Number(sessionStorage.getItem('__tabNav') || 0); sessionStorage.setItem('__tabNav', String(k + 1)); } catch (e) {}
+      if (k < 3) location.href = u.href; else el.click();
+      return;
+    }
+    if (isOn(el)) { clearInterval(t); return scroll(el); }
+    // 화면이 준비되기 전에 누르면 헛눌릴 수 있어 골라질 때까지 1.2초마다 다시
+    if (clicks < 4 && n % 4 === 1) { el.click(); clicks++; }
+    if (n > 40) { clearInterval(t); scroll(el); }
   }, 300);
 })();
 true;`;

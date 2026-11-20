@@ -1,6 +1,6 @@
 import SafeImage from "./SafeImage";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import type { NaverReviewStatus } from "./naverPlace";
 import type { NaverVisitorReview } from "./shared";
 import type { Colors } from "./theme";
@@ -13,8 +13,11 @@ export default function NaverReviews({
   reviews,
   colors: c,
   openWeb,
+  diag,
 }: {
   placeName: string;
+  /** 못 읽었을 때 원인 찾기용 기록: 있으면 '진단 정보 보내기' */
+  diag?: string | null;
   status: NaverReviewStatus;
   reviews: NaverVisitorReview[];
   colors: Colors;
@@ -38,6 +41,16 @@ export default function NaverReviews({
       )}
       {status === "failed" && <Text style={[styles.note, { color: c.muted }]}>네이버 리뷰 본문을 불러오지 못했어요. 위의 '방문자'를 누르면 네이버에서 볼 수 있어요.</Text>}
       {status === "noid" && <Text style={[styles.note, { color: c.muted }]}>네이버 지도에서 이 가게를 찾지 못했어요.</Text>}
+      {(status === "failed" || status === "noid") && diag ? (
+        <Pressable
+          onPress={() => Share.share({ message: `[네이버 리뷰 진단] ${placeName}\n${diag}` }).catch(() => {})}
+          hitSlop={8}
+          style={{ alignSelf: "flex-start", marginTop: 6 }}
+          accessibilityRole="button"
+        >
+          <Text style={{ fontSize: 12, color: c.muted, textDecorationLine: "underline" }}>진단 정보 보내기 (왜 안 되는지 확인용)</Text>
+        </Pressable>
+      ) : null}
 
       {shown.map((r) => {
         const expanded = !!open[r.id];

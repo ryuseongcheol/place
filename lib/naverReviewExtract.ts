@@ -29,6 +29,8 @@ export interface NaverReviewResult {
   booking: string | null;
   url: string;
   title: string;
+  /** 못 읽었을 때 원인 찾기용 (페이지 구조 요약) */
+  diag?: Record<string, unknown>;
 }
 
 export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
@@ -114,27 +116,25 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
     return out;
   }
 
-  // 방문자 리뷰 별점·수, 예약 가능 여부 (Apollo 캐시 → 화면)
-  function extras() {
+  // 방문자 리뷰 별점·수, 예약 가능 여부 (Apollo 캐시 → 화면). 값이 안쪽 객체에 들어 있어도 찾는다
+  function extras(st) {
     var rating = null, count = null, booking = null;
-    var st = window.__APOLLO_STATE__;
-    if (st && typeof st === "object") {
-      for (var k in st) {
-        var o = st[k];
-        if (!o || typeof o !== "object") continue;
-        var where = k + " " + str(o.__typename);
-        for (var f in o) {
-          var v = o[f];
-          if (typeof v === "number") {
-            if (rating == null && /visitorReviewsScore|visitorReviewScore|avgRating|averageRating|starAverage/i.test(f) && v > 0 && v <= 5) rating = v;
-            if (count == null && /visitorReviewsTotal|visitorReviewCount/i.test(f) && v >= 0) count = v;
-            if (count == null && /^totalCount$/.test(f) && /VisitorReview/i.test(where) && v >= 0) count = v;
-          } else if (typeof v === "string") {
-            if (!booking && /^https?:\/\/[^ ]*booking\.naver\.com/.test(v)) booking = v;
-          } else if (v === true && !booking && /^(hasBooking|isBooking|bookingAvailable|hasNaverBooking)$/i.test(f)) booking = "tab";
-        }
+    function scan(o, where, d) {
+      if (!o || typeof o !== "object" || d > 4) return;
+      for (var f in o) {
+        var v = o[f], w = where + "." + f;
+        if (typeof v === "number") {
+          if (rating == null && /(visitorReviewsScore|visitorReviewScore|avgRating|averageRating|starAverage)$/i.test(f) && v > 0 && v <= 5) rating = v;
+          if (count == null && /(visitorReviewsTotal|visitorReviewCount)$/i.test(f) && v >= 0) count = v;
+          if (count == null && /^(totalCount|total)$/.test(f) && /VisitorReview/i.test(where) && v >= 0) count = v;
+        } else if (typeof v === "string") {
+          if (!booking && /^https?:\/\/[^ ]*booking\.naver\.com/.test(v)) booking = v;
+        } else if (v === true) {
+          if (!booking && /^(hasBooking|isBooking|bookingAvailable|hasNaverBooking)$/i.test(f)) booking = "tab";
+        } else if (v && typeof v === "object" && !v.__ref) scan(v, w, d + 1);
       }
     }
+    if (st && typeof st === "object") for (var k in st) scan(st[k], k + " " + str(st[k] && st[k].__typename), 0);
     if (!booking) {
       var as = document.querySelectorAll("a[href]");
       for (var i = 0; i < as.length && !booking; i++) {
@@ -151,21 +151,56 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
       var m = str(document.body && document.body.innerText).match(/별점\s*([0-5]\.\d{1,2})/);
       if (m) rating = Number(m[1]);
     }
+    if (count == null) {
+      var m2 = str(document.body && document.body.innerText).match(/방문자\s*리뷰\s*([\d,]+)/);
+      if (m2) count = Number(m2[1].replace(/,/g, ""));
+    }
     return { stats: { rating: rating, count: count }, booking: booking };
+  }
+
+  // Apollo 상태: 서버가 넣어 둔 것(__APOLLO_STATE__) + 화면이 나중에 받아 둔 캐시(__APOLLO_CLIENT__)
+  function states() {
+    var out = [];
+    try { if (window.__APOLLO_STATE__) out.push(window.__APOLLO_STATE__); } catch (e) {}
+    try { var c = window.__APOLLO_CLIENT__; if (c && c.cache && c.cache.extract) out.push(c.cache.extract()); } catch (e) {}
+    return out;
+  }
+
+  // 못 읽었을 때 원인 찾기용 요약: 어떤 데이터가 있었는지, 리뷰 탭 글자와 주소
+  function diag(sts) {
+    var types = {}, keys = 0;
+    for (var s = 0; s < sts.length; s++) for (var k in sts[s]) {
+      keys++;
+      var tn = str(sts[s][k] && sts[s][k].__typename) || k.split(":")[0];
+      types[tn] = (types[tn] || 0) + 1;
+    }
+    var top = Object.keys(types).sort(function (a, b) { return types[b] - types[a]; }).slice(0, 15).map(function (t) { return t + ":" + types[t]; });
+    var tabs = [], as = document.querySelectorAll("a, [role=tab], button");
+    for (var i = 0; i < as.length && tabs.length < 10; i++) {
+      var tx = str(as[i].innerText).replace(/\s+/g, " ").trim();
+      if (tx && tx.length < 30 && /리뷰/.test(tx)) tabs.push(tx + " → " + (as[i].getAttribute("href") || "-") + (as[i].getAttribute("aria-selected") === "true" ? " [선택]" : ""));
+    }
+    var scripts = [], ss = document.querySelectorAll("script");
+    for (var j = 0; j < ss.length; j++) { var m = (ss[j].textContent || "").match(/window\.(__[A-Z_]+__)\s*=/g); if (m) scripts = scripts.concat(m); }
+    return { states: sts.length, keys: keys, types: top, li: document.querySelectorAll("li").length, tabs: tabs, scripts: scripts.slice(0, 6), text: str(document.body && document.body.innerText).replace(/\s+/g, " ").slice(0, 300) };
   }
 
   var tries = 0;
   var timer = setInterval(function () {
     tries++;
-    var r = [], how = "none";
-    try { r = fromState(window.__APOLLO_STATE__); if (r.length) how = "apollo"; } catch (e) {}
+    var r = [], how = "none", sts = states();
+    for (var s = 0; s < sts.length && !r.length; s++) { try { r = fromState(sts[s]); if (r.length) how = "apollo"; } catch (e) {} }
     if (!r.length) { try { r = fromScripts(); if (r.length) how = "script"; } catch (e) {} }
     if (!r.length && tries > 3) { try { r = fromDom(); if (r.length) how = "dom"; } catch (e) {} }
+    // 리뷰 목록이 늦게 그려지는 화면: 조금 내려서 불러오게
+    if (!r.length && tries === 6) { try { window.scrollTo(0, document.body.scrollHeight / 2); } catch (e) {} }
     if (r.length || tries > 30) {
       clearInterval(timer);
       var ex = { stats: { rating: null, count: null }, booking: null };
-      try { ex = extras(); } catch (e) {}
-      var msg = JSON.stringify({ type: "naverReviews", how: how, reviews: r.slice(0, 20), stats: ex.stats, booking: ex.booking, url: location.href, title: document.title });
+      try { var merged = {}; for (var q = 0; q < sts.length; q++) for (var kk in sts[q]) merged[kk] = sts[q][kk]; ex = extras(merged); } catch (e) {}
+      var dg = null;
+      if (!r.length) { try { dg = diag(sts); } catch (e) { dg = { error: String(e) }; } }
+      var msg = JSON.stringify({ type: "naverReviews", how: how, reviews: r.slice(0, 20), stats: ex.stats, booking: ex.booking, url: location.href, title: document.title, diag: dg });
       window.__naverReviews = msg;
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(msg);
     }
@@ -173,8 +208,15 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
 })();
 true;`;
 
+/** 리뷰 본문을 읽을 페이지: PC용(서버가 리뷰 20개쯤을 페이지에 담아 보냄) 먼저, 안 되면 모바일 */
+export function naverVisitorReviewPages(naverId: string) {
+  return [
+    `https://pcmap.place.naver.com/restaurant/${naverId}/review/visitor?reviewSort=recent`,
+    `https://m.place.naver.com/restaurant/${naverId}/review/visitor?reviewSort=recent`,
+  ];
+}
 export function naverVisitorReviewPage(naverId: string) {
-  return `https://m.place.naver.com/restaurant/${naverId}/review/visitor?reviewSort=recent`;
+  return naverVisitorReviewPages(naverId)[1];
 }
 
 /**
@@ -204,8 +246,8 @@ export function naverFindPlaceJs(name: string) {
       var score = tx && want && (tx.indexOf(want) >= 0 || want.indexOf(tx) >= 0) ? 2 : 1;
       if (score > bestScore) { best = m[1]; bestScore = score; }
     }
-    if (best && (bestScore === 2 || n > 8)) { clearInterval(t); post({ type: "naverPlaceId", id: best }); }
-    else if (n > 30) { clearInterval(t); post({ type: "naverPlaceId", id: null }); }
+    if (best && (bestScore === 2 || n > 8)) { clearInterval(t); post({ type: "naverPlaceId", id: best, score: bestScore }); }
+    else if (n > 30) { clearInterval(t); post({ type: "naverPlaceId", id: null, links: as.length, url: location.href, title: document.title }); }
   }, 300);
 })();
 true;`;

@@ -306,7 +306,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
               네이버 방문자 리뷰{nv.rating != null ? <Text style={{ fontWeight: "400" }}>{"  "}<Text style={{ color: "#F5A400" }}>★</Text> {nv.rating.toFixed(2)}</Text> : null}
             </Text>
           </View>
-          <NaverReviews placeName={p.name} status={nv.status} reviews={nv.reviews} colors={c} openWeb={openWeb} />
+          <NaverReviews placeName={p.name} status={nv.status} reviews={nv.reviews} colors={c} openWeb={openWeb} diag={nv.diag} />
           {nv.reviews.length > 0 && <MoreButton c={c} label="네이버에서 방문자 리뷰 전체 보기 ›" onPress={() => openNaverReviews("visitor")} />}
 
           {detail && (<>

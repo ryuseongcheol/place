@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from "react-native-webview";
 import { lookupNaverPlace, naverBookingUrl, type NaverPlaceInfo } from "./naverDevice";
-import { NAVER_REVIEW_EXTRACT_JS, naverFindPlaceJs, naverPlaceSearchUrl, naverVisitorReviewPage, type NaverReviewResult, type NaverVisitorReview } from "./shared";
+import { NAVER_REVIEW_EXTRACT_JS, naverFindPlaceJs, naverPlaceSearchUrl, naverVisitorReviewPages, type NaverReviewResult, type NaverVisitorReview } from "./shared";
 import type { ScoredPlace } from "./types";
 
 // react-native-webview 타입이 props 를 never 로 잡아서 명시 (WebViewModal 과 같은 방식)
@@ -52,7 +52,12 @@ export interface NaverPlaceData {
   bookingUrl: string | null;
   /** 화면에 넣어 둘 보이지 않는 웹뷰 (리뷰 페이지를 열어 리뷰·별점·예약 여부를 뽑는다) */
   probe: ReactNode;
+  /** 못 읽었을 때 원인 찾기용 기록 (사용자가 공유해서 보내 줄 수 있게) */
+  diag: string | null;
 }
+
+/** PC용 페이지는 PC 브라우저처럼 열어야 모바일 페이지로 넘어가지 않는다 */
+const DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
 /**
  * 상세 화면용 네이버 정보: 장소 찾기(폰에서 네이버 검색) + 방문자 리뷰 페이지 읽기.
@@ -65,6 +70,18 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
   /** 폰 네이버 검색(allSearch)이 막혔을 때: 네이버 검색 화면을 몰래 열어 id 찾기 */
   const [searching, setSearching] = useState(false);
   const [got, setGot] = useState<Fetched | null>(null);
+  /** 리뷰 페이지 후보 중 몇 번째를 읽는 중인지 (PC → 모바일) */
+  const [page, setPage] = useState(0);
+  const naverIdRef = useRef<string | null>(naverId);
+  naverIdRef.current = naverId;
+  const notes = useRef<unknown[]>([]);
+  const [diag, setDiag] = useState<string | null>(null);
+  const note = (o: unknown) => {
+    notes.current.push(o);
+    setDiag(JSON.stringify({ place: p.name, naverId: naverIdRef.current, notes: notes.current }, null, 1));
+  };
+  /** 한 페이지에서 결과를 두 번 받지 않게 (페이지가 다른 주소로 넘어가면 스크립트가 다시 돈다) */
+  const handled = useRef("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -72,6 +89,9 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     setInfo(null);
     setGot(null);
     setSearching(false);
+    setPage(0);
+    notes.current = [];
+    setDiag(null);
     const begin = (id: string | null) => {
       if (!alive) return;
       setNaverId(id);
@@ -94,9 +114,16 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
         setInfo(i);
         if (known) return;
         if (i?.id) begin(i.id);
-        else setSearching(true);
+        else {
+          if (alive) note({ step: "allSearch", found: false });
+          setSearching(true);
+        }
       })
-      .catch(() => alive && !known && setSearching(true));
+      .catch((e: Error) => {
+        if (!alive || known) return;
+        note({ step: "allSearch", error: String(e?.message ?? e) });
+        setSearching(true);
+      });
     return () => {
       alive = false;
     };
@@ -108,6 +135,7 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     if (!searching) return;
     const t = setTimeout(() => {
       setSearching(false);
+      note({ step: "searchPage", timeout: true });
       setStatus((s) => (s === "finding" ? "noid" : s));
     }, 15000);
     return () => clearTimeout(t);
@@ -118,6 +146,7 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
       const m = JSON.parse(e.nativeEvent.data) as { type?: string; id?: string | null };
       if (m.type !== "naverPlaceId") return;
       setSearching(false);
+      note({ step: "searchPage", ...m });
       if (m.id && /^\d+$/.test(m.id)) {
         foundIds.set(p.id, m.id);
         setNaverId(m.id);
@@ -132,25 +161,43 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     }
   };
 
-  // 너무 오래 걸리면 포기
+  const pages = naverId ? naverVisitorReviewPages(naverId) : [];
+  /** 이 페이지에서 못 읽었으면 다음 후보로, 다 안 되면 실패 */
+  const nextPage = (why: unknown) => {
+    const key = `${naverId}|${page}`;
+    if (handled.current === key) return;
+    handled.current = key;
+    note({ step: "reviewPage", page: pages[page], ...(typeof why === "object" && why ? why : { why }) });
+    if (page + 1 < pages.length) setPage(page + 1);
+    else setStatus("failed");
+  };
+
+  // 페이지마다 너무 오래 걸리면 다음으로
   useEffect(() => {
     if (status !== "loading") return;
-    timer.current = setTimeout(() => setStatus((s) => (s === "loading" ? "failed" : s)), 25000);
+    timer.current = setTimeout(() => nextPage({ timeout: true }), 15000);
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [status, naverId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, naverId, page]);
 
   const onMessage = (e: WebViewMessageEvent) => {
     try {
       const r = JSON.parse(e.nativeEvent.data) as NaverReviewResult;
       if (r.type !== "naverReviews") return;
       const v: Fetched = { reviews: r.reviews.filter((x) => x.body.trim()), stats: r.stats ?? { rating: null, count: null }, booking: r.booking ?? null };
+      if (!v.reviews.length) {
+        // 별점·수·예약은 건졌으면 남겨 두고 다음 페이지로
+        if (v.stats.rating != null || v.stats.count != null || v.booking) setGot((g) => g ?? v);
+        return nextPage({ how: r.how, url: r.url, title: r.title, diag: r.diag });
+      }
       if (naverId) cache.set(naverId, { at: Date.now(), v });
+      handled.current = `${naverId}|${page}`;
       setGot(v);
-      setStatus(v.reviews.length ? "done" : "failed");
-    } catch {
-      setStatus("failed");
+      setStatus("done");
+    } catch (err) {
+      nextPage({ error: String(err) });
     }
   };
 
@@ -174,10 +221,12 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
         style={{ width: 360, height: 640 }}
       />
     </View>
-  ) : status === "loading" && naverId ? (
+  ) : status === "loading" && naverId && pages[page] ? (
       <View style={styles.hidden} pointerEvents="none">
         <WebView
-          source={{ uri: naverVisitorReviewPage(naverId) }}
+          key={pages[page]}
+          source={{ uri: pages[page] }}
+          userAgent={pages[page].includes("pcmap.") ? DESKTOP_UA : undefined}
           injectedJavaScript={NAVER_REVIEW_EXTRACT_JS}
           onMessage={onMessage}
           javaScriptEnabled
@@ -185,7 +234,8 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
           sharedCookiesEnabled
           setSupportMultipleWindows={false}
           onShouldStartLoadWithRequest={(req) => /^https?:/i.test(req.url)}
-          onError={() => setStatus("failed")}
+          onError={(ev) => nextPage({ loadError: ev.nativeEvent.description })}
+          onHttpError={(ev) => ev.nativeEvent.statusCode >= 400 && nextPage({ http: ev.nativeEvent.statusCode })}
           style={{ width: 360, height: 640 }}
         />
       </View>
@@ -201,6 +251,7 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     blogCount: info?.blogReviewCount || p.naver?.blogReviewCount || null,
     bookingUrl,
     probe,
+    diag: status === "failed" || status === "noid" ? diag ?? JSON.stringify({ place: p.name, naverId, status }) : null,
   };
 }
 
