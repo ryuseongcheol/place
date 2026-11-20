@@ -161,7 +161,8 @@ export interface PlaceDetail {
   };
   sources: { kakaoDetail: SourceStatus; naverBlog: SourceStatus; naverImage: SourceStatus };
   /** 구글 별점·리뷰 수 (GOOGLE_PLACES_API_KEY 가 있고 찾았을 때) */
-  google?: { rating: number | null; count: number; url: string } | null;
+  /** 구글: url 은 구글 지도 리뷰, reviewsUrl 은 구글 검색 리뷰 화면 (앱에서는 이쪽을 연다) */
+  google?: { rating: number | null; count: number; url: string; placeId?: string; reviewsUrl?: string } | null;
   /** 출연한 방송·가이드 id */
   shows: string[];
 }

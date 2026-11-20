@@ -283,7 +283,10 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                     title: "구글 리뷰",
                     // 안드로이드 웹뷰에서 구글 지도가 "앱을 여시겠어요?" 화면을 먼저 띄우면 "웹사이트로 이동"을 대신 눌러 준다
                     clickText: ["웹사이트로 이동", "웹으로 계속", "웹에서 계속", "Go to website", "Continue on web", "Stay on web"],
+                    // 구글 검색의 리뷰 화면 (가게 id 로). 예전 서버 응답이면 구글 지도 리뷰
                     url:
+                      detail?.google?.reviewsUrl ??
+                      (detail?.google?.placeId ? `https://search.google.com/local/reviews?placeid=${encodeURIComponent(detail.google.placeId)}&hl=ko&gl=KR` : null) ??
                       detail?.google?.url ??
                       detail?.links.googleReviews ??
                       `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.roadAddress || p.address}`)}`,

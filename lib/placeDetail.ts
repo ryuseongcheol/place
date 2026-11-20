@@ -8,7 +8,7 @@ import {
   extractPhotos,
 } from "./kakaoDetail";
 import { mockDetail } from "./mock";
-import { findGooglePlace, googleSearchUrl } from "./google";
+import { findGooglePlace, googleReviewsViewerUrl, googleSearchUrl } from "./google";
 import { naverBlogSearch, naverImageSearch, naverPlaceLinks, naverSearchEnabled, naverShowSearch } from "./naver";
 import { detectShows, detectShowsInPosts, mergeShows } from "./shows";
 import { isMockMode } from "./recommend";
@@ -69,9 +69,9 @@ export async function getPlaceDetail(req: DetailRequest): Promise<PlaceDetail> {
       naverPlace: naver.place,
       naverVisitorReviews: naver.visitor,
       naverBlogReviews: naver.blog,
-      googleReviews: google?.url ?? googleSearchUrl(req.name, region),
+      googleReviews: google ? googleReviewsViewerUrl(google.placeId) : googleSearchUrl(req.name, region),
     },
-    google: google ? { rating: google.rating, count: google.count, url: google.url } : null,
+    google: google ? { rating: google.rating, count: google.count, url: google.url, placeId: google.placeId, reviewsUrl: googleReviewsViewerUrl(google.placeId) } : null,
     // 방송·가이드 출연: 카카오 상세 + 블로그(가게 이름과 함께 언급된 글)
     shows: mergeShows(
       raw ? detectShows([JSON.stringify(raw)]) : [],

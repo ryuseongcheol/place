@@ -17,6 +17,13 @@ export interface GooglePlaceInfo {
 
 export const googleEnabled = () => !!process.env.GOOGLE_PLACES_API_KEY;
 
+/**
+ * 구글 리뷰 화면 (구글 검색의 리뷰 보기). 휴대폰 브라우저로 열면 google.com/searchviewer/… 리뷰 화면으로 넘어간다.
+ * 구글 지도 웹과 달리 "앱으로 열기" 화면 없이 리뷰가 바로 나온다.
+ */
+export const googleReviewsViewerUrl = (placeId: string) =>
+  `https://search.google.com/local/reviews?placeid=${encodeURIComponent(placeId)}&hl=ko&gl=KR`;
+
 /** 키가 없거나 못 찾았을 때: 구글 지도 검색 */
 export const googleSearchUrl = (name: string, address?: string | null) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name} ${address ?? ""}`.trim())}`;
