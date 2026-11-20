@@ -7,7 +7,7 @@ import { openAppDetails, openNotificationAccessSettings } from "../modules/payme
 import { usePaymentAccess } from "./paymentAccess";
 import { getIgnoredNotifications, syncPayments, syncResultText, usePayments, type IgnoredNotification } from "./payments";
 import { MAX_REGIONS, useRegions } from "./regions";
-import { RADII } from "./SearchPanel";
+import RadiusSlider from "./RadiusSlider";
 import type { Colors } from "./theme";
 import { progressText } from "./TopSearch";
 
@@ -303,19 +303,8 @@ export default function SettingsScreen({ visible, onClose, colors: c, me, radius
           </View>
 
           <Text style={[styles.h2, { color: c.text, marginTop: 28 }]}>내 주변 검색 반경</Text>
-          <View style={[styles.seg, { borderColor: c.line }]}>
-            {RADII.map((r, i) => {
-              const on = radius === r;
-              return (
-                <Pressable
-                  key={r}
-                  onPress={() => setRadius(r)}
-                  style={[styles.segBtn, { backgroundColor: on ? c.text : c.surface }, i > 0 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: c.line }]}
-                >
-                  <Text style={{ color: on ? c.bg : c.text, fontWeight: on ? "700" : "400" }}>{r < 1000 ? `${r}m` : `${r / 1000}km`}</Text>
-                </Pressable>
-              );
-            })}
+          <View style={{ marginTop: 8 }}>
+            <RadiusSlider value={radius} onChange={setRadius} colors={c} />
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -339,6 +328,4 @@ const styles = StyleSheet.create({
   bar: { height: 6, borderRadius: 3, marginTop: 10, overflow: "hidden" },
   barFill: { height: 6, borderRadius: 3 },
   regionActions: { flexDirection: "row", gap: 18, marginTop: 10 },
-  seg: { flexDirection: "row", borderWidth: 1, borderRadius: 10, overflow: "hidden", marginTop: 10, alignSelf: "flex-start" },
-  segBtn: { paddingHorizontal: 16, paddingVertical: 10 },
 });

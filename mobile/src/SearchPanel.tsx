@@ -1,10 +1,10 @@
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 type PresetChip = { id: string; label: string; emoji: string };
+import RadiusSlider from "./RadiusSlider";
 import type { Colors } from "./theme";
 import type { LocState } from "./useLocation";
 
-export const RADII = [500, 1000, 2000, 3000];
 
 interface Props {
   colors: Colors;
@@ -120,22 +120,13 @@ export default function SearchPanel(p: Props) {
               onSubmitEditing={() => canSearch && p.onSubmit()}
             />
 
-            <View style={styles.actionRow}>
-              <View style={[styles.seg, { borderColor: c.line }]}>
-                {RADII.map((r, i) => {
-                  const on = p.radius === r;
-                  return (
-                    <Pressable
-                      key={r}
-                      onPress={() => p.setRadius(r)}
-                      style={[styles.segBtn, { backgroundColor: on ? c.text : c.surface }, i > 0 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: c.line }]}
-                      accessibilityState={{ selected: on }}
-                    >
-                      <Text style={{ fontSize: 13, color: on ? c.bg : c.text, fontWeight: on ? "700" : "400" }}>{r < 1000 ? `${r}m` : `${r / 1000}km`}</Text>
-                    </Pressable>
-                  );
-                })}
+            <View style={styles.radiusRow}>
+              <Text style={[styles.radiusLabel, { color: c.muted }]}>검색 반경</Text>
+              <View style={{ flex: 1 }}>
+                <RadiusSlider value={p.radius} onChange={p.setRadius} colors={c} compact />
               </View>
+            </View>
+            <View style={styles.actionRow}>
               <Pressable
                 style={[styles.primary, { backgroundColor: c.accent, opacity: canSearch ? 1 : 0.5 }]}
                 onPress={p.onSubmit}
@@ -174,9 +165,9 @@ const styles = StyleSheet.create({
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 38, justifyContent: "center" },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, marginTop: 14 },
-  actionRow: { flexDirection: "row", gap: 10, marginTop: 14 },
-  seg: { flexDirection: "row", borderWidth: 1, borderRadius: 10, overflow: "hidden" },
-  segBtn: { paddingHorizontal: 11, minHeight: 46, justifyContent: "center" },
+  radiusRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 10 },
+  radiusLabel: { fontSize: 13 },
+  actionRow: { flexDirection: "row", gap: 10, marginTop: 6 },
   primary: { flex: 1, borderRadius: 12, alignItems: "center", justifyContent: "center", minHeight: 46 },
   primaryText: { color: "#fff", fontSize: 16, fontWeight: "800" },
   hint: { fontSize: 12, marginTop: 10 },

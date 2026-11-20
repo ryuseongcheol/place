@@ -176,3 +176,42 @@ true;`;
 export function naverVisitorReviewPage(naverId: string) {
   return `https://m.place.naver.com/restaurant/${naverId}/review/visitor?reviewSort=recent`;
 }
+
+/**
+ * 네이버 검색 결과 화면에서 이 가게의 플레이스 id 찾기 (페이지 안에서 실행).
+ * 폰에서 네이버 검색 API(allSearch)가 막혀 id 를 모를 때, 검색 화면을 열어 가게 링크에서 id 를 읽는다.
+ * 찾으면 { type: "naverPlaceId", id } 를 보낸다 (못 찾으면 id: null). 검색 화면에서만 동작.
+ */
+export function naverFindPlaceJs(name: string) {
+  const want = name.replace(/\(.*?\)/g, "").replace(/[\s·\-_.,'"!&]/g, "").toLowerCase();
+  return String.raw`(function () {
+  if (window.__naverPick || !/(^|\.)search\.naver\.com$|^m\.map\.naver\.com$|^map\.naver\.com$/.test(location.hostname)) return;
+  window.__naverPick = true;
+  var want = ${JSON.stringify(want)};
+  function norm(s) { return String(s || "").replace(/\(.*?\)/g, "").replace(/[\s·\-_.,'"!&]/g, "").toLowerCase(); }
+  function post(o) { var s = JSON.stringify(o); window.__naverPlaceId = s; if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(s); }
+  var n = 0;
+  var t = setInterval(function () {
+    n++;
+    var best = null, bestScore = 0;
+    var as = document.querySelectorAll("a[href]");
+    for (var i = 0; i < as.length; i++) {
+      var h = as[i].href || "";
+      var m = h.match(/place\.naver\.com\/(?:restaurant|place|cafe|hairshop|accommodation)\/(\d{4,})/) || h.match(/map\.naver\.com\/(?:p\/)?(?:entry\/)?place\/(\d{4,})/);
+      if (!m) continue;
+      var box = as[i].closest("li") || as[i];
+      var tx = norm(as[i].innerText) || norm(box.innerText).slice(0, 60);
+      var score = tx && want && (tx.indexOf(want) >= 0 || want.indexOf(tx) >= 0) ? 2 : 1;
+      if (score > bestScore) { best = m[1]; bestScore = score; }
+    }
+    if (best && (bestScore === 2 || n > 8)) { clearInterval(t); post({ type: "naverPlaceId", id: best }); }
+    else if (n > 30) { clearInterval(t); post({ type: "naverPlaceId", id: null }); }
+  }, 300);
+})();
+true;`;
+}
+
+/** 가게 id 를 모를 때 여는 네이버 검색 (결과에 플레이스 링크가 들어 있다) */
+export function naverPlaceSearchUrl(query: string) {
+  return `https://m.search.naver.com/search.naver?where=m&sm=mtp_hty&query=${encodeURIComponent(query.trim())}`;
+}

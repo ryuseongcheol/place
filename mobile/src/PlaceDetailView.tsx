@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useDetail } from "./detailCache";
 import { useMyNotes } from "./myNotes";
@@ -7,11 +7,12 @@ import { MAX_MY_PHOTOS, deletePhotoFile, pickFromLibrary, takePhoto } from "./my
 import MyVisits from "./MyVisits";
 import SafeImage from "./SafeImage";
 import NaverReviews from "./NaverReviews";
-import { useNaverPlace } from "./naverPlace";
+import MenuPhotoViewer from "./MenuPhotoViewer";
+import { knownNaverId, naverQueryOf, useNaverPlace } from "./naverPlace";
 import { NaverBookingRow, ReviewTiles } from "./ReviewLinks";
 import PhotoViewer from "./PhotoViewer";
-import { NAVER_REVIEW_TAB_TEXT, lookupNaverPlace, naverBookingUrl, naverMapSearchUrl, naverReviewUrl, naverVisitorReviewUrl, resolveNaverPlaceId } from "./naverDevice";
-import { mergeShows, shortArea } from "./shared";
+import { NAVER_REVIEW_TAB_TEXT, naverReviewUrl, resolveNaverPlaceId } from "./naverDevice";
+import { mergeShows, naverPlaceSearchUrl, shortArea } from "./shared";
 import ShowBadges from "./ShowBadges";
 import { callPhone, openKakaoMap, openNaverMap } from "./openMap";
 import type { Colors } from "./theme";
@@ -86,11 +87,6 @@ interface BodyProps {
   openWeb: (t: WebTarget) => void;
 }
 
-/** 지번 주소에서 동 이름 (네이버 검색어 보조) */
-function dongOf(address: string) {
-  return address.split(/\s+/).find((t) => /(동|가|읍|면|리)$/.test(t) && !/^\d/.test(t)) ?? null;
-}
-
 /** 시트 본문: 액션 버튼, 사진, 추천 이유, 정보, 메뉴, 리뷰, 블로그 리뷰 */
 export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: BodyProps) {
   const [findingNaver, setFindingNaver] = useState(false);
@@ -105,27 +101,33 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
   // 카드 목록에서 이미 받아 둔 상세가 있으면 바로 보여준다
   const { detail, loading, error } = useDetail(p);
   const [showAllMenus, setShowAllMenus] = useState(false);
+  /** 메뉴 사진 크게 보기 (사진 있는 메뉴 중 몇 번째) */
+  const [menuView, setMenuView] = useState<number | null>(null);
   const [showAllReviews, setShowAllReviews] = useState(false);
 
   useEffect(() => {
     setShowAllMenus(false);
     setShowAllReviews(false);
+    setMenuView(null);
   }, [p.id]);
 
   const links = detail?.links;
+  const photoMenus = useMemo(() => (detail?.menus ?? []).filter((m) => !!m.image), [detail]);
 
-  // 네이버 방문자 리뷰: 장소 id를 알면 리뷰 탭으로 바로, 모르면 폰에서 찾아보고, 그래도 없으면
-  // 네이버 지도 검색을 열되 가게를 누르는 순간 리뷰 탭으로 보낸다 (블로그 검색 결과로 가지 않게)
-  const openNaverReviews = async () => {
-    const title = "네이버 방문자 리뷰";
-    let naverId = nv.naverId ?? p.naver?.naverId ?? null;
-    if (!naverId) {
+  // 네이버 리뷰(방문자·블로그): 장소 id를 알면 그 탭으로 바로. 모르면 폰에서 찾아보고, 그래도 없으면
+  // 네이버 검색 화면을 가린 채 열어 이 가게를 자동으로 골라 리뷰 탭으로 넘어간다 (가게를 직접 누를 필요 없음)
+  const openNaverReviews = async (tab: "visitor" | "blog" = "visitor") => {
+    const title = tab === "blog" ? "네이버 블로그 리뷰" : "네이버 방문자 리뷰";
+    const query = naverQueryOf(p);
+    let naverId = nv.naverId ?? knownNaverId(p);
+    if (!naverId && nv.status !== "noid") {
       setFindingNaver(true);
       naverId = await resolveNaverPlaceId(p).catch(() => null);
       setFindingNaver(false);
     }
-    if (naverId) openWeb({ title, url: naverVisitorReviewUrl(naverId, `${dongOf(p.address) ?? ""} ${p.name}`), clickText: NAVER_REVIEW_TAB_TEXT.visitor });
-    else openWeb({ title, url: naverMapSearchUrl(p.name, dongOf(p.address)), naverToReviews: true, clickText: NAVER_REVIEW_TAB_TEXT.visitor });
+    const clickText = NAVER_REVIEW_TAB_TEXT[tab];
+    if (naverId) openWeb({ title, url: naverReviewUrl(naverId, tab, query), clickText });
+    else openWeb({ title, url: naverPlaceSearchUrl(query), clickText, findNaverPlace: { placeId: p.id, name: p.name, query, tab } });
   };
 
   return (
@@ -140,6 +142,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
 
       {/* 보이지 않는 웹뷰: 네이버 리뷰 페이지 읽기 */}
       {nv.probe}
+      <MenuPhotoViewer menus={photoMenus} index={menuView} placeName={p.name} onClose={() => setMenuView(null)} />
 
       {/* 네이버 예약 (예약을 받는 곳에만) */}
       {nv.bookingUrl && <NaverBookingRow onPress={openBooking} colors={c} />}
@@ -213,15 +216,25 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
             <Text style={[styles.empty, { color: c.muted }]}>메뉴 정보가 없어요.</Text>
           ) : (
             <>
-              {(showAllMenus ? detail.menus : detail.menus.slice(0, 5)).map((m) => (
-                <View key={m.name} style={[styles.menuRow, { borderBottomColor: c.line }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 15, color: c.text }}>{m.name}</Text>
-                    {m.price && <Text style={{ fontSize: 14, fontWeight: "700", color: c.text, marginTop: 2 }}>{m.price}</Text>}
-                  </View>
-                  {m.image && <SafeImage source={{ uri: m.image }} style={[styles.menuImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
-                </View>
-              ))}
+              {(showAllMenus ? detail.menus : detail.menus.slice(0, 5)).map((m) => {
+                const photoIndex = m.image ? photoMenus.indexOf(m) : -1;
+                return (
+                  <Pressable
+                    key={m.name}
+                    disabled={photoIndex < 0}
+                    onPress={() => setMenuView(photoIndex)}
+                    style={({ pressed }) => [styles.menuRow, { borderBottomColor: c.line, opacity: pressed ? 0.6 : 1 }]}
+                    accessibilityRole={photoIndex >= 0 ? "button" : undefined}
+                    accessibilityHint={photoIndex >= 0 ? "메뉴 사진 크게 보기" : undefined}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, color: c.text }}>{m.name}</Text>
+                      {m.price && <Text style={{ fontSize: 14, fontWeight: "700", color: c.text, marginTop: 2 }}>{m.price}</Text>}
+                    </View>
+                    {m.image && <SafeImage source={{ uri: m.image }} style={[styles.menuImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
+                  </Pressable>
+                );
+              })}
               {detail.menus.length > 5 && (
                 <MoreButton c={c} label={showAllMenus ? "접기" : `메뉴 ${detail.menus.length - 5}개 더보기`} onPress={() => setShowAllMenus((v) => !v)} />
               )}
@@ -243,8 +256,8 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                 label: "방문자",
                 count: nv.visitorCount,
                 rating: nv.rating,
-                loading: nv.status === "loading" || nv.status === "finding",
-                onPress: openNaverReviews,
+                loading: findingNaver || nv.status === "loading" || nv.status === "finding",
+                onPress: () => openNaverReviews("visitor"),
               },
               {
                 key: "kakao",
@@ -282,17 +295,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                 label: "블로그",
                 count: nv.blogCount ?? detail?.blogReviewTotal ?? null,
                 rating: null,
-                onPress: () =>
-                  nv.naverId
-                    ? openWeb({
-                        title: "네이버 블로그 리뷰",
-                        url: naverReviewUrl(nv.naverId, "blog", `${dongOf(p.address) ?? ""} ${p.name}`),
-                        clickText: NAVER_REVIEW_TAB_TEXT.blog,
-                      })
-                    : openWeb({
-                        title: "네이버 블로그 리뷰",
-                        url: detail?.links.naverBlogReviews ?? `https://m.search.naver.com/search.naver?where=m_blog&query=${encodeURIComponent(p.name)}`,
-                      }),
+                onPress: () => openNaverReviews("blog"),
               },
             ]}
           />
@@ -304,7 +307,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
             </Text>
           </View>
           <NaverReviews placeName={p.name} status={nv.status} reviews={nv.reviews} colors={c} openWeb={openWeb} />
-          {nv.reviews.length > 0 && <MoreButton c={c} label="네이버에서 방문자 리뷰 전체 보기 ›" onPress={openNaverReviews} />}
+          {nv.reviews.length > 0 && <MoreButton c={c} label="네이버에서 방문자 리뷰 전체 보기 ›" onPress={() => openNaverReviews("visitor")} />}
 
           {detail && (<>
           {/* 카카오맵 후기 */}

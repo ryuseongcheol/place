@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView as RNWebView, type WebViewNavigation, type WebViewProps } from "react-native-webview";
-import { naverVisitorReviewUrl } from "./naverDevice";
+import { WebView as RNWebView, type WebViewMessageEvent, type WebViewNavigation, type WebViewProps } from "react-native-webview";
+import { naverReviewUrl, naverVisitorReviewUrl } from "./naverDevice";
+import { rememberNaverId } from "./naverPlace";
+import { naverFindPlaceJs } from "./shared";
 import type { Colors } from "./theme";
 
 // react-native-webview 타입 정의가 제네릭 기본값(undefined) 때문에 props가 never로 잡혀서 명시적으로 지정
@@ -21,6 +23,11 @@ export type WebTarget =
       naverToBooking?: boolean;
       /** 페이지가 열리면 이 글자의 탭·버튼을 한 번 눌러 준다 (예: "방문자 리뷰", 구글 "웹사이트로 이동"). 여러 개면 먼저 보이는 것 */
       clickText?: string | string[];
+      /**
+       * 가게 id 를 몰라 네이버 검색 화면을 열 때: 검색 결과에서 이 가게를 자동으로 골라
+       * 그 가게의 방문자(블로그) 리뷰 화면으로 바로 넘어간다. 찾는 동안은 검색 화면을 가린다.
+       */
+      findNaverPlace?: { placeId: string; name: string; query: string; tab: "visitor" | "blog" };
     }
   | { title: string; photos: string[]; index: number };
 
@@ -66,29 +73,38 @@ g.addEventListener('scroll',function(){c.textContent=(Math.round(g.scrollLeft/g.
 </script></body></html>`;
 }
 
-/** 페이지 안에서 원하는 탭(글자)을 찾아 한 번 누르기. 이미 골라져 있으면 그대로 */
+/**
+ * 페이지 안에서 원하는 탭(글자)을 찾아 한 번 누르고 그 자리로 스크롤. 이미 골라져 있으면 스크롤만.
+ * 탭 이름 옆 숫자는 무시한다 ("방문자 리뷰 632" = "방문자 리뷰"). 네이버 검색 화면에서는 누르지 않는다.
+ */
 function clickTabJs(text: string | string[]) {
   const wants = Array.isArray(text) ? text : [text];
   return `(function () {
-  if (window.__tabClicked) return;
-  var wants = ${JSON.stringify(wants)}, n = 0;
+  if (window.__tabClicked || /(^|\\.)search\\.naver\\.com$|^(m\\.)?map\\.naver\\.com$/.test(location.hostname)) return;
+  function norm(s) { return String(s || "").replace(/[\\s\\d,.+()]/g, ""); }
+  var wants = ${JSON.stringify(wants)}.map(norm), n = 0;
   var t = setInterval(function () {
     n++;
-    var best = null, bestLen = 1e9;
-    var els = document.querySelectorAll('a, button, [role="tab"], span, div');
+    var best = null, bestScore = 1e9;
+    var els = document.querySelectorAll('[role="tab"], a, button, span, div');
     for (var i = 0; i < els.length; i++) {
-      var tx = (els[i].innerText || "").replace(/\s+/g, " ").trim();
+      var raw = (els[i].innerText || "").replace(/\\s+/g, " ").trim();
+      if (!raw || raw.length > 40) continue;
+      var tx = norm(raw);
       for (var w = 0; w < wants.length; w++) {
-        var want = wants[w];
-        if ((tx === want || (tx.slice(-want.length) === want && tx.length <= want.length + 6)) && tx.length < bestLen) { best = els[i]; bestLen = tx.length; }
+        if (tx !== wants[w]) continue;
+        var el = els[i].closest('[role="tab"], a, button') || els[i];
+        // 탭(role=tab) > 링크·버튼 > 글자 순으로, 같으면 글자가 짧은 것
+        var score = (el.getAttribute('role') === 'tab' ? 0 : el !== els[i] || /^(A|BUTTON)$/.test(els[i].tagName) ? 100 : 200) + raw.length;
+        if (score < bestScore) { best = el; bestScore = score; }
       }
     }
     if (best) {
       clearInterval(t);
       window.__tabClicked = true;
-      var el = best.closest('a, button, [role="tab"]') || best;
-      if (el.getAttribute('aria-selected') !== 'true') el.click();
-    } else if (n > 25) clearInterval(t);
+      if (best.getAttribute('aria-selected') !== 'true') best.click();
+      setTimeout(function () { try { best.scrollIntoView({ block: 'start' }); } catch (e) {} }, 500);
+    } else if (n > 40) clearInterval(t);
   }, 300);
 })();
 true;`;
@@ -105,6 +121,8 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
   const [loading, setLoading] = useState(true);
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
   const [uri, setUri] = useState<string | null>(null);
+  /** 검색 화면에서 가게를 찾는 중 (검색 화면을 가린다) */
+  const [finding, setFinding] = useState(false);
 
   const isPhotos = !!target && "photos" in target;
 
@@ -114,7 +132,32 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
     setCanGoBack(false);
     setCurrentUrl(null);
     setLoading(true);
+    const find = target && "url" in target && target.findNaverPlace;
+    setFinding(!!find);
+    if (!find) return;
+    // 못 찾으면 검색 화면을 그대로 보여준다 (가게를 누르면 리뷰로 넘어간다)
+    const t = setTimeout(() => setFinding(false), 12000);
+    return () => clearTimeout(t);
   }, [target]);
+
+  const findOpts = target && "url" in target ? target.findNaverPlace : undefined;
+  const onMessage = (e: WebViewMessageEvent) => {
+    if (!findOpts) return;
+    try {
+      const m = JSON.parse(e.nativeEvent.data) as { type?: string; id?: string | null };
+      if (m.type !== "naverPlaceId") return;
+      if (m.id && /^\d+$/.test(m.id)) {
+        rememberNaverId(findOpts.placeId, m.id);
+        setUri(naverReviewUrl(m.id, findOpts.tab, findOpts.query));
+      } else setFinding(false);
+    } catch {
+      // 다른 메시지
+    }
+  };
+  // 리뷰 화면에 들어가면 가림막을 걷는다
+  useEffect(() => {
+    if (finding && currentUrl && /place\.naver\.com\/[a-z]+\/\d+\/review/.test(currentUrl)) setFinding(false);
+  }, [finding, currentUrl]);
 
   const close = () => onClose();
 
@@ -163,17 +206,21 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
                 }
                 const toReviews = "naverToReviews" in target && target.naverToReviews;
                 const toBooking = "naverToBooking" in target && target.naverToBooking;
-                if (toReviews || toBooking) {
+                if (toReviews || toBooking || findOpts) {
                   const m = req.url.match(NAVER_PLACE) ?? req.url.match(NAVER_PCMAP);
                   const id = m ? (m[3] ?? m[2]) : null;
                   if (id && /^\d+$/.test(id)) {
-                    setUri(toBooking ? `https://m.place.naver.com/restaurant/${id}/booking` : naverVisitorReviewUrl(id, target.title.replace(/ 방문자 리뷰$|^네이버 방문자 리뷰$/, "")));
+                    if (findOpts) {
+                      rememberNaverId(findOpts.placeId, id);
+                      setUri(naverReviewUrl(id, findOpts.tab, findOpts.query));
+                    } else setUri(toBooking ? `https://m.place.naver.com/restaurant/${id}/booking` : naverVisitorReviewUrl(id, target.title.replace(/ 방문자 리뷰$|^네이버 방문자 리뷰$/, "")));
                     return false;
                   }
                 }
                 return true;
               }}
-              injectedJavaScript={"clickText" in target && target.clickText ? clickTabJs(target.clickText) : undefined}
+              injectedJavaScript={[findOpts ? naverFindPlaceJs(findOpts.name) : "", "clickText" in target && target.clickText ? clickTabJs(target.clickText) : ""].join("\n") || undefined}
+              onMessage={onMessage}
               // 네이버 로그인 유지 (예약에 필요)
               sharedCookiesEnabled
               thirdPartyCookiesEnabled
@@ -192,7 +239,13 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
             />
           )
         )}
-        {loading && (
+        {finding && (
+          <View style={[styles.cover, { backgroundColor: c.surface }]}>
+            <ActivityIndicator color={c.accent} />
+            <Text style={{ marginTop: 10, fontSize: 14, color: c.muted }}>네이버에서 가게를 찾는 중…</Text>
+          </View>
+        )}
+        {loading && !finding && (
           <View style={styles.loading} pointerEvents="none">
             <ActivityIndicator color={isPhotos ? "#fff" : c.accent} />
           </View>
@@ -207,4 +260,5 @@ const styles = StyleSheet.create({
   barBtn: { minWidth: 44, height: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
   title: { flex: 1, fontSize: 15, fontWeight: "600", textAlign: "center" },
   loading: { position: "absolute", top: 110, left: 0, right: 0, alignItems: "center" },
+  cover: { position: "absolute", top: 48, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
 });

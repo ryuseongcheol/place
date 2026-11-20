@@ -22,6 +22,8 @@ import TimelineScreen from "./src/TimelineScreen";
 import { RegionsProvider, useRegions } from "./src/regions";
 import SaveSheet, { GroupEditor } from "./src/SaveSheet";
 import SearchPanel from "./src/SearchPanel";
+import { formatRadius, RADIUS_MAX, RADIUS_MIN } from "./src/RadiusSlider";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import SettingsScreen from "./src/SettingsScreen";
 import { haversine, type ThemePreset } from "./src/shared";
 import ThemeEditor from "./src/ThemeEditor";
@@ -31,6 +33,9 @@ import TopSearch, { type Source } from "./src/TopSearch";
 import type { ScoredPlace } from "./src/types";
 import { useLocation } from "./src/useLocation";
 import WebViewModal, { type WebTarget } from "./src/WebViewModal";
+
+/** 검색 반경 저장 키 */
+const RADIUS_KEY = "searchRadius.v1";
 
 const HALF_RATIO = 0.45;
 
@@ -101,7 +106,20 @@ function MapScreen() {
     setPanelThemeIds((ids) => (ids.every(ok) ? ids : ids.filter(ok)));
   }, [th.visible]);
   const [panelText, setPanelText] = useState("");
-  const [radius, setRadius] = useState(1000);
+  const [radius, setRadiusState] = useState(1000);
+  // 검색 반경은 다음에 켤 때도 그대로
+  useEffect(() => {
+    AsyncStorage.getItem(RADIUS_KEY)
+      .then((v) => {
+        const n = Number(v);
+        if (v && n >= RADIUS_MIN && n <= RADIUS_MAX) setRadiusState(n);
+      })
+      .catch(() => {});
+  }, []);
+  const setRadius = useCallback((r: number) => {
+    setRadiusState(r);
+    AsyncStorage.setItem(RADIUS_KEY, String(r)).catch(() => {});
+  }, []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -269,7 +287,7 @@ function MapScreen() {
       let next: Results;
       if (source.kind === "nearby") {
         if (loc.status === "locating") return;
-        const radiusText = radius < 1000 ? `${radius}m` : `${radius / 1000}km`;
+        const radiusText = formatRadius(radius);
         // 1) 서버 DB에 이 근처를 분석해 둔 데이터가 충분하면 바로 (빠르고, 분류값이 정확함)
         const db = await searchDb({ lat: loc.lat, lng: loc.lng, radius, theme: theme && !q ? themeDef(theme) : null, q: q || null }).catch(() => null);
         if (db && db.analyzed >= 30 && db.places.length >= 8) {
