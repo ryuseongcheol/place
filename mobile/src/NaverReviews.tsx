@@ -1,4 +1,4 @@
-import { Image } from "expo-image";
+import SafeImage from "./SafeImage";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { NaverReviewStatus } from "./naverPlace";
@@ -56,7 +56,7 @@ export default function NaverReviews({
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 8 }}>
                 {r.photos.map((u, i) => (
                   <Pressable key={u} onPress={() => openWeb({ title: `${placeName} 방문자 리뷰 사진`, photos: r.photos, index: i })} accessibilityLabel={`리뷰 사진 ${i + 1}`}>
-                    <Image source={{ uri: u }} style={[styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" />
+                    <SafeImage source={{ uri: u }} style={[styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" />
                   </Pressable>
                 ))}
               </ScrollView>

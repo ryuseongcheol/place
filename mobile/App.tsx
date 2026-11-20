@@ -4,7 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import { fetchRecommendations, fetchThemes, rerankRecommendations, searchDb } from "./src/api";
+import { fetchRecommendations, fetchThemes, rerankRecommendations, searchByName, searchDb } from "./src/api";
 import BottomSheet, { type BottomSheetRef, type SheetSnap } from "./src/BottomSheet";
 import { FavoritesProvider, colorHex, useFavorites, type FavGroup } from "./src/favorites";
 import { MyNotesProvider, useMyNotes } from "./src/myNotes";
@@ -354,8 +354,34 @@ function MapScreen() {
     if (theme) runSearch({ theme });
   };
 
-  const submitText = () => {
+  /** 상단 검색창: 가게 이름이 확실히 맞는 곳이 있으면 그 가게들을, 아니면 메뉴·분위기 추천 */
+  const submitText = async () => {
     setActiveThemeIds([]);
+    const q = text.trim();
+    if (q.length >= 2 && source.kind === "nearby" && loc.status !== "locating") {
+      setLoading(true);
+      const searchId = ++searchSeq.current;
+      const r = await searchByName(q, loc.lat, loc.lng).catch(() => null);
+      if (searchId !== searchSeq.current) return; // 그 사이 다른 검색
+      if (r?.strong && r.places.length) {
+        setLoading(false);
+        setResults({
+          id: searchId,
+          places: r.places,
+          title: `'${q}' 검색`,
+          subtitle: `가게 이름이 맞는 곳 ${r.places.length}곳 · 가까운 순`,
+          warnings: [],
+        });
+        setLayer("results");
+        cardPlaceId.current = null;
+        setCardIndex(0);
+        setCardsOpen(true);
+        setSheet({ mode: "results" });
+        setSnap("closed");
+        setSearchOpen(false);
+        return;
+      }
+    }
     runSearch({ text });
   };
 

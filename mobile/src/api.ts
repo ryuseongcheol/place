@@ -186,3 +186,9 @@ export function searchPlacesByName(q: string, loc: { lat: number; lng: number } 
     15000,
   );
 }
+
+/** 가게 이름으로 찾기 (상단 검색창). strong: 이름이 확실히 맞는 곳이 있음 */
+export function searchByName(q: string, lat: number, lng: number) {
+  const qs = new URLSearchParams({ q, lat: String(lat), lng: String(lng) });
+  return request<{ places: ScoredPlace[]; strong: boolean }>(`/api/search/name?${qs}`, undefined, 15000);
+}

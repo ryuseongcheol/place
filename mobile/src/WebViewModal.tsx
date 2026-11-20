@@ -19,8 +19,8 @@ export type WebTarget =
       naverToReviews?: boolean;
       /** 네이버 검색 결과에서 가게를 누르면 그 가게의 예약 탭으로 바로 보낸다 */
       naverToBooking?: boolean;
-      /** 페이지가 열리면 이 글자의 탭을 한 번 눌러 준다 (예: "방문자 리뷰", "블로그 리뷰") */
-      clickText?: string;
+      /** 페이지가 열리면 이 글자의 탭·버튼을 한 번 눌러 준다 (예: "방문자 리뷰", 구글 "웹사이트로 이동"). 여러 개면 먼저 보이는 것 */
+      clickText?: string | string[];
     }
   | { title: string; photos: string[]; index: number };
 
@@ -67,17 +67,21 @@ g.addEventListener('scroll',function(){c.textContent=(Math.round(g.scrollLeft/g.
 }
 
 /** 페이지 안에서 원하는 탭(글자)을 찾아 한 번 누르기. 이미 골라져 있으면 그대로 */
-function clickTabJs(text: string) {
+function clickTabJs(text: string | string[]) {
+  const wants = Array.isArray(text) ? text : [text];
   return `(function () {
   if (window.__tabClicked) return;
-  var want = ${JSON.stringify(text)}, n = 0;
+  var wants = ${JSON.stringify(wants)}, n = 0;
   var t = setInterval(function () {
     n++;
     var best = null, bestLen = 1e9;
     var els = document.querySelectorAll('a, button, [role="tab"], span, div');
     for (var i = 0; i < els.length; i++) {
       var tx = (els[i].innerText || "").replace(/\s+/g, " ").trim();
-      if ((tx === want || (tx.slice(-want.length) === want && tx.length <= want.length + 6)) && tx.length < bestLen) { best = els[i]; bestLen = tx.length; }
+      for (var w = 0; w < wants.length; w++) {
+        var want = wants[w];
+        if ((tx === want || (tx.slice(-want.length) === want && tx.length <= want.length + 6)) && tx.length < bestLen) { best = els[i]; bestLen = tx.length; }
+      }
     }
     if (best) {
       clearInterval(t);

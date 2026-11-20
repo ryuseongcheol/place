@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import { Image } from "expo-image";
+import SafeImage from "./SafeImage";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { formatDistance } from "./PlaceDetailView";
@@ -165,7 +165,7 @@ function PlaceCard({
       <View style={styles.photos}>
         {photos.length > 0
           ? photos.map((u, i) => (
-              <Image
+              <SafeImage
                 key={u}
                 source={{ uri: u }}
                 style={[styles.photo, { backgroundColor: c.surface2 }, i === 0 && styles.photoFirst, i === photos.length - 1 && styles.photoLast]}

@@ -5,6 +5,7 @@ import { useDetail } from "./detailCache";
 import { useMyNotes } from "./myNotes";
 import { MAX_MY_PHOTOS, deletePhotoFile, pickFromLibrary, takePhoto } from "./myPhotos";
 import MyVisits from "./MyVisits";
+import SafeImage from "./SafeImage";
 import NaverReviews from "./NaverReviews";
 import { useNaverPlace } from "./naverPlace";
 import { NaverBookingRow, ReviewTiles } from "./ReviewLinks";
@@ -157,7 +158,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photos}>
           {detail.photos.map((u, i) => (
             <Pressable key={u} onPress={() => openWeb({ title: `${p.name} 사진`, photos: detail.photos, index: i })} accessibilityLabel={`사진 ${i + 1} 크게 보기`}>
-              <Image source={{ uri: u }} style={[i === 0 ? styles.photoBig : styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" transition={150} />
+              <SafeImage source={{ uri: u }} style={[i === 0 ? styles.photoBig : styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" transition={150} />
             </Pressable>
           ))}
         </ScrollView>
@@ -218,7 +219,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                     <Text style={{ fontSize: 15, color: c.text }}>{m.name}</Text>
                     {m.price && <Text style={{ fontSize: 14, fontWeight: "700", color: c.text, marginTop: 2 }}>{m.price}</Text>}
                   </View>
-                  {m.image && <Image source={{ uri: m.image }} style={[styles.menuImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
+                  {m.image && <SafeImage source={{ uri: m.image }} style={[styles.menuImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
                 </View>
               ))}
               {detail.menus.length > 5 && (
@@ -267,6 +268,8 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                 onPress: () =>
                   openWeb({
                     title: "구글 리뷰",
+                    // 안드로이드 웹뷰에서 구글 지도가 "앱을 여시겠어요?" 화면을 먼저 띄우면 "웹사이트로 이동"을 대신 눌러 준다
+                    clickText: ["웹사이트로 이동", "웹으로 계속", "웹에서 계속", "Go to website", "Continue on web", "Stay on web"],
                     url:
                       detail?.google?.url ??
                       detail?.links.googleReviews ??
@@ -330,7 +333,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                 {r.photos.length > 0 && (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 8 }}>
                     {r.photos.map((u) => (
-                      <Image key={u} source={{ uri: u }} style={[styles.reviewImg, { backgroundColor: c.surface2 }]} contentFit="cover" />
+                      <SafeImage key={u} source={{ uri: u }} style={[styles.reviewImg, { backgroundColor: c.surface2 }]} contentFit="cover" />
                     ))}
                   </ScrollView>
                 )}
@@ -373,7 +376,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                     {[b.blogger, b.date, b.source === "kakao" ? "카카오맵" : "네이버 블로그"].filter(Boolean).join(" · ")}
                   </Text>
                 </View>
-                {b.thumbnail && <Image source={{ uri: b.thumbnail }} style={[styles.blogImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
+                {b.thumbnail && <SafeImage source={{ uri: b.thumbnail }} style={[styles.blogImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
               </Pressable>
             ))
           )}

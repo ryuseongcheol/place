@@ -36,10 +36,17 @@ function looksLikeImage(u: string) {
   return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(u) || /(daumcdn|kakaocdn|kakao\.com\/dn|img\d*\.|\/image)/i.test(u);
 }
 
-function firstImage(obj: Obj): string | null {
-  for (const k of ["orgurl", "url", "photo_url", "photoUrl", "image_url", "imageUrl", "img", "image", "thumbnail", "src"]) {
+const VIDEO_URL = /\.(mp4|m3u8|mov|webm|avi|mkv)(\?|$)/i;
+const DEFAULT_KEYS = ["orgurl", "url", "photo_url", "photoUrl", "image_url", "imageUrl", "img", "image", "thumbnail", "src"];
+/** 후기 사진은 작은 썸네일부터 (원본은 크고, 동영상이면 원본 주소가 영상이라 그림이 안 나온다) */
+const THUMB_FIRST = ["thumbnail", "thumbnail_url", "thumbnailUrl", "thumb", "small", "url", "photo_url", "photoUrl", "image_url", "imageUrl", "img", "image", "orgurl", "src"];
+
+function firstImage(obj: Obj, keys: string[] = DEFAULT_KEYS): string | null {
+  // 동영상 항목은 썸네일만 쓴다
+  const isVideo = /video|movie|clip/i.test(String(obj.type ?? obj.media_type ?? obj.mediaType ?? obj.kind ?? obj.category ?? ""));
+  for (const k of isVideo ? THUMB_FIRST.filter((x) => !["url", "orgurl", "src"].includes(x)) : keys) {
     const v = normalizeImageUrl(str(obj[k]));
-    if (v && looksLikeImage(v)) return v;
+    if (v && looksLikeImage(v) && !VIDEO_URL.test(v)) return v;
   }
   return null;
 }
@@ -64,18 +71,36 @@ function formatPrice(v: unknown): string | null {
   return s && s !== "0" ? s : null;
 }
 
+/** 메뉴 이름 비교용: 띄어쓰기·기호·[추천] 같은 표시를 빼고 비교 (괄호 안 옵션은 다른 메뉴로 본다) */
+export function menuKey(name: string): string {
+  return name
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/[\s·\-_.,'"!&*★☆~]/g, "")
+    .toLowerCase();
+}
+
 export function extractMenus(raw: unknown, limit = 40): MenuItem[] {
   const out: MenuItem[] = [];
-  const seen = new Set<string>();
+  // 같은 메뉴가 메뉴판·사진 메뉴 등 여러 곳에 있으면 하나로 합치고, 빠진 사진·가격을 채운다
+  const byKey = new Map<string, MenuItem>();
   walk(raw, (obj, path) => {
-    if (out.length >= limit || !/menu/.test(path)) return;
+    if (!/menu/.test(path)) return;
     const name = str(obj.menu) ?? str(obj.name) ?? str(obj.menu_name) ?? str(obj.title);
     if (!name || name.length > 40) return;
     const price = formatPrice(obj.price ?? obj.price_text ?? obj.menu_price);
     if (!price && !("price" in obj)) return; // 메뉴 객체로 보기 어려움
-    if (seen.has(name)) return;
-    seen.add(name);
-    out.push({ name, price, image: firstImage(obj) });
+    const key = menuKey(name) || name;
+    const image = firstImage(obj);
+    const prev = byKey.get(key);
+    if (prev) {
+      if (!prev.image && image) prev.image = image;
+      if (!prev.price && price) prev.price = price;
+      return;
+    }
+    if (out.length >= limit) return;
+    const item: MenuItem = { name: name.replace(/\s+/g, " "), price, image };
+    byKey.set(key, item);
+    out.push(item);
   });
   return out;
 }
@@ -92,8 +117,8 @@ export function extractKakaoReviews(raw: unknown, limit = 20): ReviewItem[] {
     const owner = (obj.owner ?? obj.user ?? obj.writer) as Obj | undefined;
     const photos: string[] = [];
     walk(obj.photoList ?? obj.photos ?? obj.photo_list, (p) => {
-      const img = firstImage(p);
-      if (img && photos.length < 4) photos.push(img);
+      const img = firstImage(p, THUMB_FIRST);
+      if (img && photos.length < 4 && !photos.includes(img)) photos.push(img);
     });
     out.push({
       text: text.replace(/\s+/g, " ").slice(0, 500),
