@@ -14,8 +14,11 @@ export default function NaverReviews({
   colors: c,
   openWeb,
   diag,
+  naverUrl,
 }: {
   placeName: string;
+  /** 동영상 주소를 못 찾았거나 재생이 안 될 때 여는 네이버 방문자 리뷰 화면 */
+  naverUrl?: string | null;
   /** 못 읽었을 때 원인 찾기용 기록: 있으면 '진단 정보 보내기' */
   diag?: string | null;
   status: NaverReviewStatus;
@@ -65,8 +68,28 @@ export default function NaverReviews({
                 {r.body}
               </Text>
             </Pressable>
-            {r.photos.length > 0 && (
+            {(r.photos.length > 0 || (r.videos?.length ?? 0) > 0) && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 8 }}>
+                {/* 동영상: ▶ 표시, 누르면 앱 안에서 재생 (주소를 못 찾았으면 네이버 리뷰 화면) */}
+                {(r.videos ?? []).map((v, i) => (
+                  <Pressable
+                    key={`v${i}`}
+                    onPress={() =>
+                      v.url
+                        ? openWeb({ title: `${placeName} 리뷰 동영상`, video: v.url, poster: v.thumbnail, fallbackUrl: naverUrl })
+                        : naverUrl && openWeb({ title: "네이버 방문자 리뷰", url: naverUrl })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={`리뷰 동영상 ${i + 1} 재생`}
+                  >
+                    <View style={[styles.photo, { backgroundColor: "#222", overflow: "hidden" }]}>
+                      {v.thumbnail ? <SafeImage source={{ uri: v.thumbnail }} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
+                      <View style={styles.play}>
+                        <Text style={styles.playText}>▶</Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                ))}
                 {r.photos.map((u, i) => (
                   <Pressable key={u} onPress={() => openWeb({ title: `${placeName} 방문자 리뷰 사진`, photos: r.photos, index: i })} accessibilityLabel={`리뷰 사진 ${i + 1}`}>
                     <SafeImage source={{ uri: u }} style={[styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" />
@@ -100,6 +123,8 @@ const styles = StyleSheet.create({
   note: { fontSize: 12, lineHeight: 18, paddingVertical: 10 },
   review: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   photo: { width: 72, height: 72, borderRadius: 8 },
+  play: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.25)" },
+  playText: { color: "#fff", fontSize: 22, textShadowColor: "rgba(0,0,0,0.6)", textShadowRadius: 4 },
   kws: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
   kw: { fontSize: 11, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, overflow: "hidden" },
   more: { borderWidth: 1, borderRadius: 10, paddingVertical: 10, alignItems: "center", marginTop: 10 },

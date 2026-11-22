@@ -29,7 +29,9 @@ export type WebTarget =
        */
       findNaverPlace?: { placeId: string; name: string; query: string; tab: "visitor" | "blog" };
     }
-  | { title: string; photos: string[]; index: number };
+  | { title: string; photos: string[]; index: number }
+  /** 동영상 재생 (리뷰 동영상). 재생이 안 되면 fallbackUrl(네이버 리뷰 화면)을 바깥 브라우저로 */
+  | { title: string; video: string; poster?: string | null; fallbackUrl?: string | null };
 
 /** 웹뷰가 부른 앱 링크 열기. intent:// 는 안의 scheme 으로 바꿔 열고, 안 되면 대체 웹 주소로 */
 async function openExternal(url: string) {
@@ -70,6 +72,25 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden}
 var g=document.getElementById('g'),c=document.getElementById('c');
 requestAnimationFrame(function(){g.scrollLeft=g.clientWidth*${index};});
 g.addEventListener('scroll',function(){c.textContent=(Math.round(g.scrollLeft/g.clientWidth)+1)+' / ${photos.length}';});
+</script></body></html>`;
+}
+
+/** 동영상만 보여주는 페이지: mp4 는 그대로, m3u8(HLS)은 기기가 못 틀면 hls.js 로 */
+function videoHtml(src: string, poster?: string | null) {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain;background:#000}
+.e{position:fixed;left:0;right:0;top:45%;text-align:center;color:#bbb;font:14px -apple-system,sans-serif;display:none}</style></head><body>
+<video id="v" controls autoplay playsinline ${poster ? `poster="${esc(poster)}"` : ""}></video><div class="e" id="e">동영상을 재생하지 못했어요</div>
+<script>
+var v=document.getElementById('v'),src=${JSON.stringify(src)};
+function fail(){document.getElementById('e').style.display='block';if(window.ReactNativeWebView)window.ReactNativeWebView.postMessage('videoError');}
+v.addEventListener('error',fail);
+if(/\\.m3u8(\\?|$)/i.test(src)&&!v.canPlayType('application/vnd.apple.mpegurl')){
+  var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
+  s.onload=function(){if(window.Hls&&Hls.isSupported()){var h=new Hls();h.loadSource(src);h.attachMedia(v);h.on(Hls.Events.ERROR,function(e,d){if(d.fatal)fail();});}else fail();};
+  s.onerror=fail;document.head.appendChild(s);
+}else{v.src=src;}
 </script></body></html>`;
 }
 
@@ -152,7 +173,8 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
   /** 검색 화면에서 가게를 찾는 중 (검색 화면을 가린다) */
   const [finding, setFinding] = useState(false);
 
-  const isPhotos = !!target && "photos" in target;
+  const isPhotos = !!target && ("photos" in target || "video" in target);
+  const [videoFailed, setVideoFailed] = useState(false);
 
   useEffect(() => {
     setUri(target && "url" in target ? target.url : null);
@@ -160,6 +182,7 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
     setCanGoBack(false);
     setCurrentUrl(null);
     setLoading(true);
+    setVideoFailed(false);
     const find = target && "url" in target && target.findNaverPlace;
     setFinding(!!find);
     if (!find) return;
@@ -212,7 +235,26 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
             <View style={styles.barBtn} />
           )}
         </View>
-        {target && "photos" in target ? (
+        {target && "video" in target ? (
+          <View style={{ flex: 1 }}>
+            <WebView
+              source={{ html: videoHtml(target.video, target.poster), baseUrl: "https://m.place.naver.com/" }}
+              originWhitelist={["*"]}
+              javaScriptEnabled
+              allowsInlineMediaPlayback
+              allowsFullscreenVideo
+              mediaPlaybackRequiresUserAction={false}
+              onMessage={(e: WebViewMessageEvent) => e.nativeEvent.data === "videoError" && setVideoFailed(true)}
+              onLoadEnd={() => setLoading(false)}
+              style={{ flex: 1, backgroundColor: "#000" }}
+            />
+            {videoFailed && target.fallbackUrl ? (
+              <Pressable onPress={() => Linking.openURL(target.fallbackUrl!)} style={styles.videoFallback} accessibilityRole="button">
+                <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>네이버에서 보기 ↗</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : target && "photos" in target ? (
           <WebView
             source={{ html: photoHtml(target.photos, target.index) }}
             originWhitelist={["*"]}
@@ -288,5 +330,6 @@ const styles = StyleSheet.create({
   barBtn: { minWidth: 44, height: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
   title: { flex: 1, fontSize: 15, fontWeight: "600", textAlign: "center" },
   loading: { position: "absolute", top: 110, left: 0, right: 0, alignItems: "center" },
+  videoFallback: { position: "absolute", alignSelf: "center", bottom: 40, backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 20, paddingHorizontal: 18, paddingVertical: 10 },
   cover: { position: "absolute", top: 48, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
 });

@@ -2,7 +2,18 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from "react-native-webview";
 import { lookupNaverPlace, naverBookingUrl, type NaverPlaceInfo } from "./naverDevice";
-import { dedupePhotos, NAVER_REVIEW_EXTRACT_JS, naverFindPlaceJs, naverPlaceSearchUrl, naverVisitorReviewPages, type NaverReviewResult, type NaverVisitorReview } from "./shared";
+import {
+  dedupePhotos,
+  NAVER_BLOG_EXTRACT_JS,
+  NAVER_REVIEW_EXTRACT_JS,
+  naverBlogReviewPages,
+  naverFindPlaceJs,
+  naverPlaceSearchUrl,
+  naverVisitorReviewPages,
+  type NaverBlogReview,
+  type NaverReviewResult,
+  type NaverVisitorReview,
+} from "./shared";
 import type { ScoredPlace } from "./types";
 
 // react-native-webview 타입이 props 를 never 로 잡아서 명시 (WebViewModal 과 같은 방식)
@@ -18,6 +29,33 @@ interface Fetched {
 
 /** 네이버 장소 id 별로 30분 기억 */
 const cache = new Map<string, { at: number; v: Fetched }>();
+/** 블로그 리뷰 탭 글도 같은 기간 기억 */
+const blogCache = new Map<string, { at: number; blogs: NaverBlogReview[]; count: number | null }>();
+
+export type NaverBlogStatus = "idle" | "loading" | "done" | "failed";
+
+/** 새로 읽은 네이버 리뷰 수를 상세 위쪽 요약 줄에도 쓰도록 나눠 둔다 (우리 장소 id 별) */
+type LiveCounts = { visitor: number | null; blog: number | null };
+const live = new Map<string, LiveCounts>();
+const liveSubs = new Set<() => void>();
+function publishCounts(placeId: string, c: LiveCounts) {
+  const prev = live.get(placeId);
+  if (prev && prev.visitor === c.visitor && prev.blog === c.blog) return;
+  live.set(placeId, c);
+  liveSubs.forEach((f) => f());
+}
+/** 상세 위쪽 요약 줄용: 리뷰 페이지에서 읽은 네이버 방문자·블로그 리뷰 수 (아직이면 null) */
+export function useNaverCounts(placeId: string): LiveCounts | null {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const f = () => tick((n) => n + 1);
+    liveSubs.add(f);
+    return () => {
+      liveSubs.delete(f);
+    };
+  }, []);
+  return live.get(placeId) ?? null;
+}
 const TTL = 30 * 60 * 1000;
 
 /** 검색 화면에서 찾아낸 네이버 장소 id (우리 장소 id 별, 앱을 켜 둔 동안) */
@@ -54,6 +92,9 @@ export interface NaverPlaceData {
   probe: ReactNode;
   /** 못 읽었을 때 원인 찾기용 기록 (사용자가 공유해서 보내 줄 수 있게) */
   diag: string | null;
+  /** 네이버 플레이스 '블로그 리뷰' 탭의 글 (블로그 검색 결과가 아니라 가게에 연결된 글) */
+  blogs: NaverBlogReview[];
+  blogStatus: NaverBlogStatus;
 }
 
 /** PC용 페이지는 PC 브라우저처럼 열어야 모바일 페이지로 넘어가지 않는다 */
@@ -82,6 +123,12 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
   };
   /** 한 페이지에서 결과를 두 번 받지 않게 (페이지가 다른 주소로 넘어가면 스크립트가 다시 돈다) */
   const handled = useRef("");
+  // 블로그 리뷰 탭: 방문자 리뷰를 다 읽은 뒤에 이어서 (웹뷰를 한 번에 하나만)
+  const [blogs, setBlogs] = useState<NaverBlogReview[]>([]);
+  const [blogCount, setBlogCount] = useState<number | null>(null);
+  const [blogStatus, setBlogStatus] = useState<NaverBlogStatus>("idle");
+  const [blogPage, setBlogPage] = useState(0);
+  const blogHandled = useRef("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -92,6 +139,10 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     setPage(0);
     notes.current = [];
     setDiag(null);
+    setBlogs([]);
+    setBlogCount(null);
+    setBlogStatus("idle");
+    setBlogPage(0);
     const begin = (id: string | null) => {
       if (!alive) return;
       setNaverId(id);
@@ -182,6 +233,47 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, naverId, page]);
 
+  // 블로그 리뷰 탭 읽기: 방문자 리뷰가 끝나면 (기억해 둔 게 있으면 그것)
+  const blogPages = naverId ? naverBlogReviewPages(naverId) : [];
+  useEffect(() => {
+    if (!naverId || blogStatus !== "idle" || (status !== "done" && status !== "failed")) return;
+    const hit = blogCache.get(naverId);
+    if (hit && Date.now() - hit.at < TTL) {
+      setBlogs(hit.blogs);
+      setBlogCount(hit.count);
+      setBlogStatus(hit.blogs.length ? "done" : "failed");
+    } else setBlogStatus("loading");
+  }, [status, naverId, blogStatus]);
+  const nextBlogPage = () => {
+    const key = `${naverId}|${blogPage}`;
+    if (blogHandled.current === key) return;
+    blogHandled.current = key;
+    if (blogPage + 1 < blogPages.length) setBlogPage(blogPage + 1);
+    else setBlogStatus("failed");
+  };
+  useEffect(() => {
+    if (blogStatus !== "loading") return;
+    const t = setTimeout(nextBlogPage, 13000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blogStatus, naverId, blogPage]);
+  const onBlogMessage = (e: WebViewMessageEvent) => {
+    try {
+      const r = JSON.parse(e.nativeEvent.data) as NaverReviewResult;
+      if (r.type !== "naverReviews") return;
+      const list = (r.blogs ?? []).filter((b) => b.title && b.url);
+      const count = r.stats?.blogCount ?? null;
+      if (count != null) setBlogCount(count);
+      if (!list.length) return nextBlogPage();
+      blogHandled.current = `${naverId}|${blogPage}`;
+      setBlogs(list);
+      setBlogStatus("done");
+      if (naverId) blogCache.set(naverId, { at: Date.now(), blogs: list, count });
+    } catch {
+      nextBlogPage();
+    }
+  };
+
   const onMessage = (e: WebViewMessageEvent) => {
     try {
       const r = JSON.parse(e.nativeEvent.data) as NaverReviewResult;
@@ -196,6 +288,8 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
       handled.current = `${naverId}|${page}`;
       setGot(v);
       setStatus("done");
+      // 방문자 페이지에 블로그 글이 미리 들어 있으면 먼저 보여 주고, 블로그 탭에서 전체를 이어서 읽는다
+      if (r.blogs?.length) setBlogs((b) => (b.length ? b : r.blogs!));
     } catch (err) {
       nextPage({ error: String(err) });
     }
@@ -239,7 +333,31 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
           style={{ width: 360, height: 640 }}
         />
       </View>
+    ) : blogStatus === "loading" && naverId && blogPages[blogPage] ? (
+      <View style={styles.hidden} pointerEvents="none">
+        <WebView
+          key={blogPages[blogPage]}
+          source={{ uri: blogPages[blogPage] }}
+          userAgent={blogPages[blogPage].includes("pcmap.") ? DESKTOP_UA : undefined}
+          injectedJavaScript={NAVER_BLOG_EXTRACT_JS}
+          onMessage={onBlogMessage}
+          javaScriptEnabled
+          domStorageEnabled
+          sharedCookiesEnabled
+          setSupportMultipleWindows={false}
+          onShouldStartLoadWithRequest={(req) => /^https?:/i.test(req.url)}
+          onError={() => nextBlogPage()}
+          onHttpError={(ev) => ev.nativeEvent.statusCode >= 400 && nextBlogPage()}
+          style={{ width: 360, height: 640 }}
+        />
+      </View>
     ) : null;
+
+  const visitorCount = got?.stats.count ?? (info?.visitorReviewCount || null) ?? (p.naver?.visitorReviewCount || null);
+  const blogTotal = got?.stats.blogCount ?? blogCount ?? (info?.blogReviewCount || p.naver?.blogReviewCount || null);
+  useEffect(() => {
+    if (got?.stats.count != null || got?.stats.blogCount != null || blogCount != null) publishCounts(p.id, { visitor: visitorCount, blog: blogTotal });
+  }, [p.id, visitorCount, blogTotal, got, blogCount]);
 
   return {
     naverId,
@@ -247,12 +365,14 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     status,
     reviews: got?.reviews ?? [],
     rating: got?.stats.rating ?? p.naver?.rating ?? null,
-    visitorCount: got?.stats.count ?? (info?.visitorReviewCount || null) ?? (p.naver?.visitorReviewCount || null),
+    visitorCount,
     // 리뷰 페이지에서 읽은 수(사용자가 네이버에서 보는 숫자)를 먼저
-    blogCount: got?.stats.blogCount ?? (info?.blogReviewCount || p.naver?.blogReviewCount || null),
+    blogCount: blogTotal,
     bookingUrl,
     probe,
     diag: status === "failed" || status === "noid" ? diag ?? JSON.stringify({ place: p.name, naverId, status }) : null,
+    blogs,
+    blogStatus,
   };
 }
 

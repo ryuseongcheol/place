@@ -8,7 +8,7 @@ import MyVisits from "./MyVisits";
 import SafeImage from "./SafeImage";
 import NaverReviews from "./NaverReviews";
 import MenuPhotoViewer from "./MenuPhotoViewer";
-import { knownNaverId, naverQueryOf, useNaverPlace } from "./naverPlace";
+import { knownNaverId, naverQueryOf, useNaverCounts, useNaverPlace } from "./naverPlace";
 import { NaverBookingRow, ReviewTiles } from "./ReviewLinks";
 import PhotoViewer from "./PhotoViewer";
 import { NAVER_REVIEW_TAB_TEXT, naverReviewUrl, resolveNaverPlaceId } from "./naverDevice";
@@ -40,6 +40,10 @@ export function PlaceHeader({
   const category = p.category.split(">").slice(-1)[0]?.trim();
   // 카카오 별점·후기 수: 상세를 열 때 새로 읽은 값(최신)을 먼저, 없으면 목록에 있던 값
   const kakao = kakaoNow(p, useDetail(p).detail);
+  // 네이버 리뷰 수: 아래 리뷰 칸과 같은 숫자(리뷰 페이지에서 새로 읽은 값)를 먼저
+  const live = useNaverCounts(p.id);
+  const naverVisitor = live?.visitor ?? p.naver?.visitorReviewCount ?? null;
+  const naverBlog = live?.blog ?? p.naver?.blogReviewCount ?? null;
   return (
     <View style={styles.headerWrap}>
       <View style={styles.headerRow}>
@@ -59,10 +63,8 @@ export function PlaceHeader({
                 {kakao.count ? <Text style={{ color: c.muted }}> ({kakao.count.toLocaleString()})</Text> : null}
               </Text>
             )}
-            {!!p.naver?.visitorReviewCount && (
-              <Text style={{ fontSize: 13, color: c.muted }}>방문자리뷰 {p.naver.visitorReviewCount.toLocaleString()}</Text>
-            )}
-            {!!p.naver?.blogReviewCount && <Text style={{ fontSize: 13, color: c.muted }}>블로그 {p.naver.blogReviewCount.toLocaleString()}</Text>}
+            {!!naverVisitor && <Text style={{ fontSize: 13, color: c.muted }}>방문자리뷰 {naverVisitor.toLocaleString()}</Text>}
+            {!!naverBlog && <Text style={{ fontSize: 13, color: c.muted }}>블로그 {naverBlog.toLocaleString()}</Text>}
             {distance != null && <Text style={{ fontSize: 13, color: c.muted }}>{formatDistance(distance)}</Text>}
           </View>
           {!!shortArea(p) && (
@@ -113,10 +115,12 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
   /** 메뉴 사진 크게 보기 (사진 있는 메뉴 중 몇 번째) */
   const [menuView, setMenuView] = useState<number | null>(null);
   const [showAllReviews, setShowAllReviews] = useState(false);
+  const [showAllBlogs, setShowAllBlogs] = useState(false);
 
   useEffect(() => {
     setShowAllMenus(false);
     setShowAllReviews(false);
+    setShowAllBlogs(false);
     setMenuView(null);
   }, [p.id]);
 
@@ -318,7 +322,15 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
               네이버 방문자 리뷰{nv.rating != null ? <Text style={{ fontWeight: "400" }}>{"  "}<Text style={{ color: "#F5A400" }}>★</Text> {nv.rating.toFixed(2)}</Text> : null}
             </Text>
           </View>
-          <NaverReviews placeName={p.name} status={nv.status} reviews={nv.reviews} colors={c} openWeb={openWeb} diag={nv.diag} />
+          <NaverReviews
+            placeName={p.name}
+            status={nv.status}
+            reviews={nv.reviews}
+            colors={c}
+            openWeb={openWeb}
+            diag={nv.diag}
+            naverUrl={nv.naverId ? naverReviewUrl(nv.naverId, "visitor", naverQueryOf(p)) : null}
+          />
           {nv.reviews.length > 0 && <MoreButton c={c} label="네이버에서 방문자 리뷰 전체 보기 ›" onPress={() => openNaverReviews("visitor")} />}
 
           {detail && (<>
@@ -361,41 +373,49 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
         </Section>
       )}
 
-      {/* 블로그 리뷰 */}
-      {detail && (
+      {/* 블로그 리뷰: 네이버 플레이스 '블로그 리뷰' 탭의 글 (네이버 팝업과 같은 목록).
+          못 읽었을 때만 블로그 검색 결과를 대신 보여 준다 */}
+      {(detail || nv.blogs.length > 0 || nv.blogStatus === "loading") && (
         <Section c={c} title={`블로그 리뷰${nv.blogCount ? ` ${nv.blogCount.toLocaleString()}` : ""}`}>
-          {detail.blogReviews.length === 0 ? (
+          {nv.blogs.length > 0 ? (
+            nv.blogs.slice(0, showAllBlogs ? 20 : 8).map((b) => (
+              <BlogRow
+                key={b.url}
+                c={c}
+                title={b.title}
+                snippet={b.body}
+                meta={[b.author, b.date, b.kind === "cafe" ? "네이버 카페" : "네이버 블로그"].filter(Boolean).join(" · ")}
+                thumbnail={b.thumbnail}
+                onPress={() => openWeb({ url: b.url, title: b.title })}
+              />
+            ))
+          ) : nv.blogStatus === "loading" || (nv.naverId && nv.blogStatus === "idle") ? (
+            <View style={styles.blogLoading}>
+              <ActivityIndicator color={c.naver} size="small" />
+              <Text style={{ fontSize: 13, color: c.muted }}>네이버 블로그 리뷰 불러오는 중…</Text>
+            </View>
+          ) : !detail || detail.blogReviews.length === 0 ? (
             <Text style={[styles.empty, { color: c.muted }]}>
-              {detail.sources.naverBlog === "disabled"
-                ? "네이버 검색 API 키가 없어 블로그 리뷰를 불러오지 않았어요."
-                : "관련 블로그 글을 찾지 못했어요."}
+              {detail?.sources.naverBlog === "disabled" ? "네이버 검색 API 키가 없어 블로그 리뷰를 불러오지 않았어요." : "관련 블로그 글을 찾지 못했어요."}
             </Text>
           ) : (
-            detail.blogReviews.slice(0, 8).map((b) => (
-              <Pressable
-                key={b.url}
-                style={[styles.blog, { borderBottomColor: c.line }]}
-                onPress={() => openWeb({ url: b.url, title: b.title })}
-                accessibilityRole="link"
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }} numberOfLines={2}>
-                    {b.title}
-                  </Text>
-                  {!!b.snippet && (
-                    <Text style={{ fontSize: 13, lineHeight: 19, color: c.muted, marginTop: 4 }} numberOfLines={2}>
-                      {b.snippet}
-                    </Text>
-                  )}
-                  <Text style={{ fontSize: 12, color: c.muted, marginTop: 6 }}>
-                    {[b.blogger, b.date, b.source === "kakao" ? "카카오맵" : "네이버 블로그"].filter(Boolean).join(" · ")}
-                  </Text>
-                </View>
-                {b.thumbnail && <SafeImage source={{ uri: b.thumbnail }} style={[styles.blogImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
-              </Pressable>
-            ))
+            <>
+              <Text style={[styles.empty, { color: c.muted, paddingVertical: 6 }]}>네이버 플레이스 블로그 리뷰를 읽지 못해 블로그 검색 결과를 보여드려요.</Text>
+              {detail.blogReviews.slice(0, 8).map((b) => (
+                <BlogRow
+                  key={b.url}
+                  c={c}
+                  title={b.title}
+                  snippet={b.snippet}
+                  meta={[b.blogger, b.date, b.source === "kakao" ? "카카오맵" : "블로그 검색"].filter(Boolean).join(" · ")}
+                  thumbnail={b.thumbnail}
+                  onPress={() => openWeb({ url: b.url, title: b.title })}
+                />
+              ))}
+            </>
           )}
-          <MoreButton c={c} label="네이버에서 블로그 리뷰 더보기 ›" onPress={() => openWeb({ url: detail.links.naverBlogReviews, title: `${p.name} 블로그 리뷰` })} />
+          {nv.blogs.length > 8 && !showAllBlogs && <MoreButton c={c} label={`블로그 리뷰 ${Math.min(20, nv.blogs.length) - 8}개 더보기`} onPress={() => setShowAllBlogs(true)} />}
+          <MoreButton c={c} label="네이버에서 블로그 리뷰 더보기 ›" onPress={() => openNaverReviews("blog")} />
         </Section>
       )}
 
@@ -403,6 +423,25 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
         사진·메뉴·후기는 카카오맵·네이버의 공개 정보를 참고용으로 보여주며 실제와 다를 수 있어요.
       </Text>
     </View>
+  );
+}
+
+function BlogRow({ c, title, snippet, meta, thumbnail, onPress }: { c: Colors; title: string; snippet?: string | null; meta: string; thumbnail?: string | null; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.blog, { borderBottomColor: c.line }]} onPress={onPress} accessibilityRole="link">
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }} numberOfLines={2}>
+          {title}
+        </Text>
+        {!!snippet && (
+          <Text style={{ fontSize: 13, lineHeight: 19, color: c.muted, marginTop: 4 }} numberOfLines={2}>
+            {snippet}
+          </Text>
+        )}
+        <Text style={{ fontSize: 12, color: c.muted, marginTop: 6 }}>{meta}</Text>
+      </View>
+      {thumbnail ? <SafeImage source={{ uri: thumbnail }} style={[styles.blogImg, { backgroundColor: c.surface2 }]} contentFit="cover" /> : null}
+    </Pressable>
   );
 }
 
@@ -479,6 +518,7 @@ const styles = StyleSheet.create({
   review: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   reviewImg: { width: 72, height: 72, borderRadius: 6 },
   blog: { flexDirection: "row", gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  blogLoading: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12 },
   blogImg: { width: 76, height: 76, borderRadius: 8 },
   more: { borderWidth: 1, borderRadius: 10, paddingVertical: 11, alignItems: "center", marginTop: 12 },
   foot: { fontSize: 11, textAlign: "center", marginTop: 24, paddingHorizontal: 24, lineHeight: 17 },
