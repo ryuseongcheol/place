@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from "react-native-webview";
 import { lookupNaverPlace, naverBookingUrl, type NaverPlaceInfo } from "./naverDevice";
-import { NAVER_REVIEW_EXTRACT_JS, naverFindPlaceJs, naverPlaceSearchUrl, naverVisitorReviewPages, type NaverReviewResult, type NaverVisitorReview } from "./shared";
+import { dedupePhotos, NAVER_REVIEW_EXTRACT_JS, naverFindPlaceJs, naverPlaceSearchUrl, naverVisitorReviewPages, type NaverReviewResult, type NaverVisitorReview } from "./shared";
 import type { ScoredPlace } from "./types";
 
 // react-native-webview 타입이 props 를 never 로 잡아서 명시 (WebViewModal 과 같은 방식)
@@ -186,7 +186,7 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     try {
       const r = JSON.parse(e.nativeEvent.data) as NaverReviewResult;
       if (r.type !== "naverReviews") return;
-      const v: Fetched = { reviews: r.reviews.filter((x) => x.body.trim()), stats: r.stats ?? { rating: null, count: null }, booking: r.booking ?? null };
+      const v: Fetched = { reviews: r.reviews.filter((x) => x.body.trim()).map((x) => ({ ...x, photos: dedupePhotos(x.photos) })), stats: r.stats ?? { rating: null, count: null }, booking: r.booking ?? null };
       if (!v.reviews.length) {
         // 별점·수·예약은 건졌으면 남겨 두고 다음 페이지로
         if (v.stats.rating != null || v.stats.count != null || v.booking) setGot((g) => g ?? v);

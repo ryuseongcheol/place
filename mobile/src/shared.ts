@@ -7,4 +7,4 @@ export { SHOWS, applyShows, mergeShows, showKind, showLabel } from "../../lib/sh
 export { categoryIcon } from "../../lib/categoryIcon";
 export { dongCore, sameBranch, shortArea, splitBranch } from "../../lib/placeName";
 export { parsePaymentNotification, type ParsedPayment } from "../../lib/paymentParse";
-export { NAVER_REVIEW_EXTRACT_JS, naverFindPlaceJs, naverPlaceSearchUrl, naverVisitorReviewPage, naverVisitorReviewPages, type NaverReviewResult, type NaverVisitorReview } from "../../lib/naverReviewExtract";
+export { dedupePhotos, NAVER_REVIEW_EXTRACT_JS, naverFindPlaceJs, naverPlaceSearchUrl, naverVisitorReviewPage, naverVisitorReviewPages, type NaverReviewResult, type NaverVisitorReview } from "../../lib/naverReviewExtract";

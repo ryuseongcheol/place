@@ -40,14 +40,24 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
   function str(v) { return typeof v === "string" ? v : v == null ? "" : String(v); }
   function img(u) { u = str(u); if (!u) return null; if (u.indexOf("//") === 0) u = "https:" + u; return /^https?:/.test(u) ? u : null; }
   function uniq(a) { var o = [], s = {}; for (var i = 0; i < a.length; i++) { if (a[i] && !s[a[i]]) { s[a[i]] = 1; o.push(a[i]); } } return o; }
+  // 같은 사진인지: 크기 옵션(?type=w560 등)과 검색 프록시(search.pstatic.net/common/?src=…)를 걷어낸 경로로 비교
+  function photoKey(u) {
+    try {
+      var x = new URL(u), src = x.searchParams.get("src");
+      if (src) x = new URL(src.indexOf("//") === 0 ? "https:" + src : src);
+      return decodeURIComponent(x.pathname).replace(/\/+$/, "").toLowerCase();
+    } catch (e) { return String(u).split("?")[0]; }
+  }
+  function uniqPhotos(a) { var o = [], s = {}; for (var i = 0; i < a.length; i++) { if (!a[i]) continue; var k = photoKey(a[i]); if (!s[k]) { s[k] = 1; o.push(a[i]); } } return o; }
 
   function toReview(o, deref) {
     var body = str(o.body || o.content || o.reviewBody).trim();
     if (body.length < 2) return null;
     var a = deref(o.author) || {};
     var media = (o.media || o.images || o.photos || []).map(deref).filter(Boolean);
-    var photos = media.map(function (m) { return img(m.thumbnail || m.url || m.src || m.imageUrl); });
-    if (o.thumbnail) photos.unshift(img(o.thumbnail));
+    var photos = media.map(function (m) { return img(m.thumbnail || m.url || m.src || m.imageUrl); }).filter(Boolean);
+    // 리뷰 대표 사진(thumbnail)은 보통 첨부 사진 첫 장과 같은 사진이라 첨부가 없을 때만
+    if (!photos.length && o.thumbnail) photos.push(img(o.thumbnail));
     var kws = (o.votedKeywords || o.keywords || []).map(deref).filter(Boolean).map(function (k) { return str(k.name || k.displayName || k); });
     return {
       id: str(o.id || o.reviewId || body.slice(0, 20)),
@@ -55,7 +65,7 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
       nickname: str(a.nickname || a.name || o.nickname) || null,
       visited: str(o.visited || o.visitDate || o.visitDateTime || o.created) || null,
       visitCount: typeof o.visitCount === "number" ? o.visitCount : null,
-      photos: uniq(photos).slice(0, 6),
+      photos: uniqPhotos(photos).slice(0, 6),
       keywords: uniq(kws).slice(0, 6),
     };
   }
@@ -111,7 +121,7 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
       var ims = li.querySelectorAll("img");
       for (var k = 0; k < ims.length; k++) { var w = ims[k].naturalWidth || ims[k].width; if (w === 0 || w > 60) imgs.push(img(ims[k].currentSrc || ims[k].src)); }
       var vc = text.match(/(\d+)번째 방문/);
-      out.push({ id: "dom-" + out.length, body: best.slice(0, 1500), nickname: lines[0] && lines[0].length <= 20 ? lines[0] : null, visited: (text.match(DATE) || [null])[0], visitCount: vc ? Number(vc[1]) : null, photos: uniq(imgs).slice(0, 6), keywords: [] });
+      out.push({ id: "dom-" + out.length, body: best.slice(0, 1500), nickname: lines[0] && lines[0].length <= 20 ? lines[0] : null, visited: (text.match(DATE) || [null])[0], visitCount: vc ? Number(vc[1]) : null, photos: uniqPhotos(imgs).slice(0, 6), keywords: [] });
     }
     return out;
   }
@@ -215,6 +225,25 @@ export function naverVisitorReviewPages(naverId: string) {
     `https://m.place.naver.com/restaurant/${naverId}/review/visitor?reviewSort=recent`,
   ];
 }
+/** 같은 사진 빼기 (앱 쪽에서도 한 번 더): 크기 옵션·검색 프록시를 걷어낸 경로로 비교 */
+export function dedupePhotos(urls: string[]) {
+  const seen = new Set<string>();
+  return urls.filter((u) => {
+    let k: string;
+    try {
+      let x = new URL(u);
+      const src = x.searchParams.get("src");
+      if (src) x = new URL(src.startsWith("//") ? `https:${src}` : src);
+      k = decodeURIComponent(x.pathname).replace(/\/+$/, "").toLowerCase();
+    } catch {
+      k = u.split("?")[0];
+    }
+    if (!u || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export function naverVisitorReviewPage(naverId: string) {
   return naverVisitorReviewPages(naverId)[1];
 }
