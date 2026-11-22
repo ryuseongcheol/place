@@ -3,7 +3,7 @@ import { fetchWithTimeout, hashKey, haversine, nameSimilarity } from "./util";
 
 /**
  * [공식] Google Places API (New) 텍스트 검색으로 구글 별점·리뷰 수와 리뷰 화면 주소 찾기.
- * GOOGLE_PLACES_API_KEY 가 있을 때만. 결과는 14일 기억 (못 찾은 것은 3일).
+ * GOOGLE_PLACES_API_KEY 가 있을 때만. 결과는 7일 기억 (못 찾은 것은 3일).
  * https://developers.google.com/maps/documentation/places/web-service/text-search
  */
 export interface GooglePlaceInfo {
@@ -41,7 +41,8 @@ interface GPlace {
 export async function findGooglePlace(name: string, lat: number, lng: number): Promise<GooglePlaceInfo | null> {
   const key = process.env.GOOGLE_PLACES_API_KEY;
   if (!key) return null;
-  const ck = `gp:v1:${hashKey(`${name}|${lat.toFixed(4)}|${lng.toFixed(4)}`)}`;
+  // v2: 짝짓기 기준을 바꿔서 예전에 잘못 붙은 결과를 버린다
+  const ck = `gp:v2:${hashKey(`${name}|${lat.toFixed(4)}|${lng.toFixed(4)}`)}`;
   const cached = await cacheGet<{ v: GooglePlaceInfo | null }>(ck);
   if (cached) return cached.v;
   try {
@@ -72,8 +73,9 @@ export async function findGooglePlace(name: string, lat: number, lng: number): P
       if (!p.location) continue;
       const dist = haversine({ lat, lng }, { lat: p.location.latitude, lng: p.location.longitude });
       const sim = nameSimilarity(name, p.displayName?.text ?? "");
-      // 같은 이름 다른 지점에 붙지 않게: 가까우면서 이름이 비슷해야 (아주 가까우면 이름 표기가 달라도 인정)
-      if (!((sim >= 0.45 && dist <= 250) || dist <= 40)) continue;
+      // 같은 이름 다른 지점·옆 가게에 붙지 않게: 가까우면서 이름이 비슷해야.
+      // (예전엔 40m 안이면 이름이 달라도 인정해서 같은 건물 옆 가게의 별점·리뷰 수가 붙을 수 있었다)
+      if (!((sim >= 0.45 && dist <= 250) || (sim >= 0.3 && dist <= 60))) continue;
       const score = sim - dist / 1000;
       if (!best || score > best.score) best = { p, score };
     }
@@ -86,7 +88,8 @@ export async function findGooglePlace(name: string, lat: number, lng: number): P
           url: best.p.googleMapsLinks?.reviewsUri ?? best.p.googleMapsUri ?? googleSearchUrl(name),
         }
       : null;
-    await cachePut(ck, { v }, v ? 14 * 86400 : 3 * 86400);
+    // 리뷰 수가 너무 오래된 값이 되지 않게 7일 (못 찾은 것은 3일)
+    await cachePut(ck, { v }, v ? 7 * 86400 : 3 * 86400);
     return v;
   } catch (e) {
     console.error("[google]", e);

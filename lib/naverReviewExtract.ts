@@ -23,8 +23,8 @@ export interface NaverReviewResult {
   type: "naverReviews";
   how: "apollo" | "script" | "dom" | "none";
   reviews: NaverVisitorReview[];
-  /** 방문자 리뷰 별점 평균·전체 수 (페이지에 있을 때) */
-  stats: { rating: number | null; count: number | null };
+  /** 방문자 리뷰 별점·전체 수, 블로그 리뷰 수 (페이지에 있을 때) */
+  stats: { rating: number | null; count: number | null; blogCount?: number | null };
   /** 네이버 예약: 예약 주소, 예약 탭만 있으면 "tab", 없으면 null */
   booking: string | null;
   url: string;
@@ -126,17 +126,29 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
     return out;
   }
 
-  // 방문자 리뷰 별점·수, 예약 가능 여부 (Apollo 캐시 → 화면). 값이 안쪽 객체에 들어 있어도 찾는다
+  // 방문자 리뷰 별점·수, 블로그 리뷰 수, 예약 가능 여부.
+  // 수는 화면에 보이는 글자("방문자 리뷰 632", "블로그 리뷰 193", "별점 4.52")를 먼저 믿는다 (사용자가 보는 숫자).
+  // 없으면 Apollo 캐시에서 이름이 확실한 필드만 (리뷰 작성자 정보의 "리뷰 수·평균"을 잘못 집지 않게)
   function extras(st) {
-    var rating = null, count = null, booking = null;
+    var rating = null, count = null, blogCount = null, booking = null;
+    var body = str(document.body && document.body.innerText);
+    var mv = body.match(/방문자\s*리뷰\s*([\d,]+)/), mb = body.match(/블로그\s*리뷰\s*([\d,]+)/), mr = body.match(/별점\s*([0-5]\.\d{1,2})/);
+    if (mv) count = Number(mv[1].replace(/,/g, ""));
+    if (mb) blogCount = Number(mb[1].replace(/,/g, ""));
+    if (mr) rating = Number(mr[1]);
+    var PERSON = /author|owner|writer|reviewer|user|profile/i;
     function scan(o, where, d) {
-      if (!o || typeof o !== "object" || d > 4) return;
+      if (!o || typeof o !== "object" || d > 4 || PERSON.test(where)) return;
       for (var f in o) {
         var v = o[f], w = where + "." + f;
         if (typeof v === "number") {
-          if (rating == null && /(visitorReviewsScore|visitorReviewScore|avgRating|averageRating|starAverage)$/i.test(f) && v > 0 && v <= 5) rating = v;
-          if (count == null && /(visitorReviewsTotal|visitorReviewCount)$/i.test(f) && v >= 0) count = v;
-          if (count == null && /^(totalCount|total)$/.test(f) && /VisitorReview/i.test(where) && v >= 0) count = v;
+          if (rating == null && /^(visitorReviewsScore|visitorReviewScore)$/.test(f) && v > 0 && v <= 5) rating = v;
+          if (rating == null && /^avgRating$/.test(f) && /VisitorReviewStats/i.test(where) && v > 0 && v <= 5) rating = v;
+          if (count == null && /^(visitorReviewsTotal|visitorReviewCount)$/.test(f) && v >= 0) count = v;
+          if (count == null && /^totalCount$/.test(f) && /VisitorReviewStats/i.test(where) && v >= 0) count = v;
+          if (count == null && /^total$/.test(f) && /^ROOT_QUERY\.visitorReviews\(/.test(where) && v >= 0) count = v;
+          if (blogCount == null && /^(fsasReviewsTotal|blogReviewsTotal|blogCafeReviewCount)$/.test(f) && v >= 0) blogCount = v;
+          if (blogCount == null && /^total$/.test(f) && /^ROOT_QUERY\.fsasReviews\(/.test(where) && v >= 0) blogCount = v;
         } else if (typeof v === "string") {
           if (!booking && /^https?:\/\/[^ ]*booking\.naver\.com/.test(v)) booking = v;
         } else if (v === true) {
@@ -144,7 +156,7 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
         } else if (v && typeof v === "object" && !v.__ref) scan(v, w, d + 1);
       }
     }
-    if (st && typeof st === "object") for (var k in st) scan(st[k], k + " " + str(st[k] && st[k].__typename), 0);
+    if (st && typeof st === "object") for (var k in st) scan(st[k], k === "ROOT_QUERY" ? "ROOT_QUERY" : k + " " + str(st[k] && st[k].__typename), 0);
     if (!booking) {
       var as = document.querySelectorAll("a[href]");
       for (var i = 0; i < as.length && !booking; i++) {
@@ -157,15 +169,7 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
       var tabs = document.querySelectorAll("[role=tab], a[role=tab]");
       for (var j = 0; j < tabs.length && !booking; j++) if (str(tabs[j].innerText).trim() === "예약") booking = "tab";
     }
-    if (rating == null) {
-      var m = str(document.body && document.body.innerText).match(/별점\s*([0-5]\.\d{1,2})/);
-      if (m) rating = Number(m[1]);
-    }
-    if (count == null) {
-      var m2 = str(document.body && document.body.innerText).match(/방문자\s*리뷰\s*([\d,]+)/);
-      if (m2) count = Number(m2[1].replace(/,/g, ""));
-    }
-    return { stats: { rating: rating, count: count }, booking: booking };
+    return { stats: { rating: rating, count: count, blogCount: blogCount }, booking: booking };
   }
 
   // Apollo 상태: 서버가 넣어 둔 것(__APOLLO_STATE__) + 화면이 나중에 받아 둔 캐시(__APOLLO_CLIENT__)
@@ -206,7 +210,7 @@ export const NAVER_REVIEW_EXTRACT_JS = String.raw`(function () {
     if (!r.length && tries === 6) { try { window.scrollTo(0, document.body.scrollHeight / 2); } catch (e) {} }
     if (r.length || tries > 30) {
       clearInterval(timer);
-      var ex = { stats: { rating: null, count: null }, booking: null };
+      var ex = { stats: { rating: null, count: null, blogCount: null }, booking: null };
       try { var merged = {}; for (var q = 0; q < sts.length; q++) for (var kk in sts[q]) merged[kk] = sts[q][kk]; ex = extras(merged); } catch (e) {}
       var dg = null;
       if (!r.length) { try { dg = diag(sts); } catch (e) { dg = { error: String(e) }; } }

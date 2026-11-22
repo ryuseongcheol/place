@@ -164,6 +164,8 @@ export interface PlaceDetail {
   google?: { rating: number | null; count: number; url: string; placeId?: string; reviewsUrl?: string } | null;
   /** 출연한 방송·가이드 id */
   shows: string[];
+  /** 카카오맵 별점·후기 수·블로그 리뷰 수 (상세를 열 때 새로 읽은 값, 목록 값보다 최신) */
+  kakao?: { rating: number | null; ratingCount: number; reviewCount: number; blogReviewCount: number } | null;
 }
 
 // ---------- 지역 미리 수집 (/api/regions, /api/crawl) ----------

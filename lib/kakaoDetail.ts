@@ -200,22 +200,43 @@ export function formatDate(v: unknown): string | null {
 export function parseKakaoDetail(json: unknown): KakaoReviewInfo | null {
   // 신규 형태: { kakaomap_review: { score_set: { average_score, review_count } }, blog_review: { review_count } ... }
   // 구 형태:   { basicInfo: { feedback: { scoresum, scorecnt, comntcnt, blogrvwcnt } }, comment: { list: [{ contents }] } }
+  // 같은 이름(review_count, average_score)이 블로그 리뷰·리뷰 작성자 정보에도 있어서
+  // 어느 묶음에서 읽을지 정해 두고 얕게만 찾는다 (예전엔 블로그 리뷰 수를 카카오 후기 수로 읽을 수 있었다)
+  const root = (json && typeof json === "object" ? json : {}) as Record<string, unknown>;
+  const kr = root["kakaomap_review"];
+  const br = root["blog_review"];
+  const fb = deepFind(json, ["feedback"], 3);
+  const num = (v: unknown) => toNumber(v);
+
   let rating: number | null = null;
   let ratingCount = 0;
-
-  const avg = toNumber(deepFind(json, ["average_score", "averageScore", "avg_score"]));
-  if (avg !== null) rating = avg;
-
-  const scoresum = toNumber(deepFind(json, ["scoresum"]));
-  const scorecnt = toNumber(deepFind(json, ["scorecnt"]));
-  if (rating === null && scoresum !== null && scorecnt) rating = scoresum / scorecnt;
-  if (scorecnt) ratingCount = scorecnt;
-
-  const reviewCount = toNumber(deepFind(json, ["review_count", "comntcnt", "reviewCount", "kakaomap_review_count"])) ?? 0;
+  let reviewCount = 0;
+  let blogCount = 0;
+  if (kr && typeof kr === "object") {
+    // kakaomap_review.score_set.{average_score, review_count} (리뷰 목록·작성자 정보까지 내려가지 않게 깊이 1)
+    rating = num(deepFind(kr, ["average_score", "averageScore", "avg_score"], 1));
+    reviewCount = num(deepFind(kr, ["review_count", "reviewCount", "total_count", "totalCount"], 1)) ?? 0;
+    ratingCount = num(deepFind(kr, ["score_count", "scoreCount", "rating_count"], 1)) ?? reviewCount;
+  }
+  if (br && typeof br === "object") blogCount = num(deepFind(br, ["review_count", "reviewCount", "total_count", "totalCount", "blogrvwcnt"], 1)) ?? 0;
+  if (fb && typeof fb === "object") {
+    // 예전 형태: basicInfo.feedback.{scoresum, scorecnt, comntcnt, blogrvwcnt}
+    const f = fb as Record<string, unknown>;
+    const scoresum = num(f.scoresum);
+    const scorecnt = num(f.scorecnt);
+    if (rating === null && scoresum !== null && scorecnt) rating = scoresum / scorecnt;
+    if (!ratingCount && scorecnt) ratingCount = scorecnt;
+    if (!reviewCount) reviewCount = num(f.comntcnt) ?? 0;
+    if (!blogCount) blogCount = num(f.blogrvwcnt) ?? 0;
+  }
+  if (!kr && !fb) {
+    // 모르는 형태: 예전처럼 전체에서 (블로그 묶음은 빼고)
+    const rest = { ...root };
+    delete rest["blog_review"];
+    rating = num(deepFind(rest, ["average_score", "averageScore", "avg_score"], 3));
+    reviewCount = num(deepFind(rest, ["review_count", "comntcnt", "reviewCount", "kakaomap_review_count"], 3)) ?? 0;
+  }
   if (!ratingCount) ratingCount = reviewCount;
-
-  const blogCount =
-    toNumber(deepFind((json as Record<string, unknown>)?.["blog_review"] ?? json, ["blogrvwcnt", "review_count", "total_count"])) ?? 0;
 
   const snippets = collectStrings(json, ["contents", "content", "review_text"], 8)
     .filter((s) => s.length >= 8)
@@ -230,7 +251,7 @@ export function parseKakaoDetail(json: unknown): KakaoReviewInfo | null {
     rating: rating !== null ? Math.round(Math.min(5, Math.max(0, rating)) * 10) / 10 : null,
     ratingCount,
     reviewCount,
-    blogReviewCount: blogCount === reviewCount ? 0 : blogCount,
+    blogReviewCount: blogCount,
     snippets,
     tags,
   };

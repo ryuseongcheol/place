@@ -38,6 +38,8 @@ export function PlaceHeader({
   onClose: () => void;
 }) {
   const category = p.category.split(">").slice(-1)[0]?.trim();
+  // 카카오 별점·후기 수: 상세를 열 때 새로 읽은 값(최신)을 먼저, 없으면 목록에 있던 값
+  const kakao = kakaoNow(p, useDetail(p).detail);
   return (
     <View style={styles.headerWrap}>
       <View style={styles.headerRow}>
@@ -51,10 +53,10 @@ export function PlaceHeader({
             {p.name} <Text style={{ fontSize: 13, fontWeight: "400", color: c.muted }}>{category}</Text>
           </Text>
           <View style={styles.metaRow}>
-            {p.kakao?.rating != null && (
+            {kakao.rating != null && (
               <Text style={{ fontSize: 13, color: c.text }}>
-                <Text style={{ color: "#F5A400" }}>★</Text> {p.kakao.rating.toFixed(1)}
-                <Text style={{ color: c.muted }}> ({p.kakao.ratingCount.toLocaleString()})</Text>
+                <Text style={{ color: "#F5A400" }}>★</Text> {kakao.rating.toFixed(1)}
+                {kakao.count ? <Text style={{ color: c.muted }}> ({kakao.count.toLocaleString()})</Text> : null}
               </Text>
             )}
             {!!p.naver?.visitorReviewCount && (
@@ -76,6 +78,13 @@ export function PlaceHeader({
       </View>
     </View>
   );
+}
+
+/** 카카오 별점·후기 수: 상세에서 새로 읽은 값이 있으면 그것, 없으면 목록(검색·저장 데이터) 값 */
+function kakaoNow(p: ScoredPlace, detail: PlaceDetail | null) {
+  const k = detail?.kakao;
+  if (k) return { rating: k.rating, count: k.reviewCount || k.ratingCount || 0 };
+  return { rating: p.kakao?.rating ?? null, count: p.kakao ? p.kakao.reviewCount || p.kakao.ratingCount || 0 : 0 };
 }
 
 interface BodyProps {
@@ -262,8 +271,8 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                 key: "kakao",
                 badge: { kind: "kakao" },
                 label: "후기",
-                count: p.kakao ? p.kakao.reviewCount || p.kakao.ratingCount || null : null,
-                rating: p.kakao?.rating ?? null,
+                count: kakaoNow(p, detail).count,
+                rating: kakaoNow(p, detail).rating,
                 onPress: () =>
                   openWeb({
                     title: "카카오맵 후기",
@@ -295,7 +304,8 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                 key: "blog",
                 badge: { kind: "naverBlog" },
                 label: "블로그",
-                count: nv.blogCount ?? detail?.blogReviewTotal ?? null,
+                // 네이버 플레이스의 블로그 리뷰 수 (블로그 검색 결과 수와는 다른 숫자라 섞지 않는다)
+                count: nv.blogCount,
                 rating: null,
                 onPress: () => openNaverReviews("blog"),
               },
@@ -316,9 +326,9 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
           <View style={[styles.subHead]}>
             <Text style={{ fontSize: 14, fontWeight: "700", color: c.text }}>
               카카오맵 후기{" "}
-              {p.kakao?.rating != null && (
+              {kakaoNow(p, detail).rating != null && (
                 <Text style={{ fontWeight: "400" }}>
-                  <Text style={{ color: "#F5A400" }}>★</Text> {p.kakao.rating.toFixed(1)} · {p.kakao.ratingCount.toLocaleString()}명
+                  <Text style={{ color: "#F5A400" }}>★</Text> {kakaoNow(p, detail).rating!.toFixed(1)} · {kakaoNow(p, detail).count.toLocaleString()}명
                 </Text>
               )}
             </Text>
@@ -353,7 +363,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
 
       {/* 블로그 리뷰 */}
       {detail && (
-        <Section c={c} title={`블로그 리뷰${detail.blogReviewTotal ? ` ${detail.blogReviewTotal.toLocaleString()}` : ""}`}>
+        <Section c={c} title={`블로그 리뷰${nv.blogCount ? ` ${nv.blogCount.toLocaleString()}` : ""}`}>
           {detail.blogReviews.length === 0 ? (
             <Text style={[styles.empty, { color: c.muted }]}>
               {detail.sources.naverBlog === "disabled"

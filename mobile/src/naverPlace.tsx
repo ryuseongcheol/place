@@ -248,7 +248,8 @@ export function useNaverPlace(p: ScoredPlace): NaverPlaceData {
     reviews: got?.reviews ?? [],
     rating: got?.stats.rating ?? p.naver?.rating ?? null,
     visitorCount: got?.stats.count ?? (info?.visitorReviewCount || null) ?? (p.naver?.visitorReviewCount || null),
-    blogCount: info?.blogReviewCount || p.naver?.blogReviewCount || null,
+    // 리뷰 페이지에서 읽은 수(사용자가 네이버에서 보는 숫자)를 먼저
+    blogCount: got?.stats.blogCount ?? (info?.blogReviewCount || p.naver?.blogReviewCount || null),
     bookingUrl,
     probe,
     diag: status === "failed" || status === "noid" ? diag ?? JSON.stringify({ place: p.name, naverId, status }) : null,

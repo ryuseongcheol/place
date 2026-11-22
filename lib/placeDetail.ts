@@ -6,6 +6,7 @@ import {
   extractMenus,
   extractOpenHours,
   extractPhotos,
+  parseKakaoDetail,
 } from "./kakaoDetail";
 import { mockDetail } from "./mock";
 import { findGooglePlace, googleReviewsViewerUrl, googleSearchUrl } from "./google";
@@ -20,6 +21,11 @@ export interface DetailRequest {
   lat: number;
   lng: number;
   naverId: string | null;
+}
+
+function kakaoSummary(raw: unknown): PlaceDetail["kakao"] {
+  const k = raw ? parseKakaoDetail(raw) : null;
+  return k ? { rating: k.rating, ratingCount: k.ratingCount, reviewCount: k.reviewCount, blogReviewCount: k.blogReviewCount } : null;
 }
 
 export async function getPlaceDetail(req: DetailRequest): Promise<PlaceDetail> {
@@ -72,6 +78,7 @@ export async function getPlaceDetail(req: DetailRequest): Promise<PlaceDetail> {
       googleReviews: google ? googleReviewsViewerUrl(google.placeId) : googleSearchUrl(req.name, region),
     },
     google: google ? { rating: google.rating, count: google.count, url: google.url, placeId: google.placeId, reviewsUrl: googleReviewsViewerUrl(google.placeId) } : null,
+    kakao: kakaoSummary(raw),
     // 방송·가이드 출연: 카카오 상세 + 블로그(가게 이름과 함께 언급된 글)
     shows: mergeShows(
       raw ? detectShows([JSON.stringify(raw)]) : [],
