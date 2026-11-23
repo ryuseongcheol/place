@@ -175,7 +175,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photos}>
           {detail.photos.map((u, i) => (
             <Pressable key={u} onPress={() => openWeb({ title: `${p.name} 사진`, photos: detail.photos, index: i })} accessibilityLabel={`사진 ${i + 1} 크게 보기`}>
-              <SafeImage source={{ uri: u }} style={[i === 0 ? styles.photoBig : styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" transition={150} />
+              <SafeImage size={i === 0 ? 220 : 140} source={{ uri: u }} style={[i === 0 ? styles.photoBig : styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" transition={150} />
             </Pressable>
           ))}
         </ScrollView>
@@ -243,7 +243,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                       <Text style={{ fontSize: 15, color: c.text }}>{m.name}</Text>
                       {m.price && <Text style={{ fontSize: 14, fontWeight: "700", color: c.text, marginTop: 2 }}>{m.price}</Text>}
                     </View>
-                    {m.image && <SafeImage source={{ uri: m.image }} style={[styles.menuImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
+                    {m.image && <SafeImage size={64} source={{ uri: m.image }} style={[styles.menuImg, { backgroundColor: c.surface2 }]} contentFit="cover" />}
                   </Pressable>
                 );
               })}
@@ -360,7 +360,7 @@ export function PlaceBody({ place: p, colors: c, isFavorite, onSave, openWeb }: 
                 {r.photos.length > 0 && (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 8 }}>
                     {r.photos.map((u) => (
-                      <SafeImage key={u} source={{ uri: u }} style={[styles.reviewImg, { backgroundColor: c.surface2 }]} contentFit="cover" />
+                      <SafeImage key={u} size={80} source={{ uri: u }} style={[styles.reviewImg, { backgroundColor: c.surface2 }]} contentFit="cover" />
                     ))}
                   </ScrollView>
                 )}
@@ -440,7 +440,7 @@ function BlogRow({ c, title, snippet, meta, thumbnail, onPress }: { c: Colors; t
         )}
         <Text style={{ fontSize: 12, color: c.muted, marginTop: 6 }}>{meta}</Text>
       </View>
-      {thumbnail ? <SafeImage source={{ uri: thumbnail }} style={[styles.blogImg, { backgroundColor: c.surface2 }]} contentFit="cover" /> : null}
+      {thumbnail ? <SafeImage size={72} source={{ uri: thumbnail }} style={[styles.blogImg, { backgroundColor: c.surface2 }]} contentFit="cover" /> : null}
     </Pressable>
   );
 }

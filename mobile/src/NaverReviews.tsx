@@ -83,7 +83,7 @@ export default function NaverReviews({
                     accessibilityLabel={`리뷰 동영상 ${i + 1} 재생`}
                   >
                     <View style={[styles.photo, { backgroundColor: "#222", overflow: "hidden" }]}>
-                      {v.thumbnail ? <SafeImage source={{ uri: v.thumbnail }} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
+                      {v.thumbnail ? <SafeImage size={72} source={{ uri: v.thumbnail }} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
                       <View style={styles.play}>
                         <Text style={styles.playText}>▶</Text>
                       </View>
@@ -92,7 +92,7 @@ export default function NaverReviews({
                 ))}
                 {r.photos.map((u, i) => (
                   <Pressable key={u} onPress={() => openWeb({ title: `${placeName} 방문자 리뷰 사진`, photos: r.photos, index: i })} accessibilityLabel={`리뷰 사진 ${i + 1}`}>
-                    <SafeImage source={{ uri: u }} style={[styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" />
+                    <SafeImage size={72} source={{ uri: u }} style={[styles.photo, { backgroundColor: c.surface2 }]} contentFit="cover" />
                   </Pressable>
                 ))}
               </ScrollView>

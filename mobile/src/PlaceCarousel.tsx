@@ -180,6 +180,7 @@ function PlaceCard({
           ? photos.map((u, i) => (
               <SafeImage
                 key={u}
+                size={120}
                 source={{ uri: u }}
                 style={[styles.photo, { backgroundColor: c.surface2 }, i === 0 && styles.photoFirst, i === photos.length - 1 && styles.photoLast]}
                 contentFit="cover"

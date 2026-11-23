@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewNavigation, type WebViewProps } from "react-native-webview";
+import { largeImage } from "./imageUrl";
 import { naverReviewUrl, naverVisitorReviewUrl } from "./naverDevice";
 import { rememberNaverId } from "./naverPlace";
 import { naverFindPlaceJs } from "./shared";
@@ -56,7 +57,13 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};
 
 /** 사진만 보여주는 페이지: 좌우로 넘기고, 두 손가락으로 확대 */
 function photoHtml(photos: string[], index: number) {
-  const imgs = photos.map((u) => `<div class="s"><img src="${esc(u)}" loading="lazy"/></div>`).join("");
+  // 화면에 맞는 크기를 먼저 (빠르게), 안 되면 원본으로
+  const imgs = photos
+    .map((u) => {
+      const { first, original } = largeImage(u);
+      return `<div class="s"><img src="${esc(first)}" data-o="${esc(original)}" loading="lazy" onerror="if(this.dataset.o&&this.src!==this.dataset.o){this.src=this.dataset.o}"/></div>`;
+    })
+    .join("");
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes">
 <style>
@@ -256,7 +263,8 @@ export default function WebViewModal({ target, onClose, colors: c }: { target: W
           </View>
         ) : target && "photos" in target ? (
           <WebView
-            source={{ html: photoHtml(target.photos, target.index) }}
+            // 네이버 사진은 네이버에서 부른 것처럼 (막히지 않게)
+            source={{ html: photoHtml(target.photos, target.index), baseUrl: "https://m.place.naver.com/" }}
             originWhitelist={["*"]}
             onLoadEnd={() => setLoading(false)}
             style={{ flex: 1, backgroundColor: "#000" }}

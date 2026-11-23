@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import { Image } from "expo-image";
+import SafeImage from "./SafeImage";
 import { useEffect, useRef, useState } from "react";
 import { FlatList, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -110,11 +110,11 @@ function Slide({ item, fallback, width, height, top, bottom }: { item: MenuItem;
   const area = { position: "absolute" as const, left: 0, right: 0, top: top + 64, bottom: bottom + 150 };
   return (
     <View style={{ width, height, backgroundColor: "#3B2A20" }}>
-      {bg && <Image source={{ uri: bg }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={photo ? 28 : 40} onError={() => !photo && setBgFailed(true)} />}
+      {bg && <SafeImage size={150} source={{ uri: bg }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={photo ? 28 : 40} onError={() => !photo && setBgFailed(true)} />}
       <View style={[StyleSheet.absoluteFill, { backgroundColor: photo ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.55)" }]} />
       {/* 가운데: 잘리지 않은 원본, 사진이 없으면 기본 그림 */}
       {photo ? (
-        <Image source={{ uri: photo }} style={area} contentFit="contain" transition={150} onError={() => setFailed(true)} accessibilityLabel={`${item.name} 사진`} />
+        <SafeImage size={400} source={{ uri: photo }} style={area} contentFit="contain" transition={150} onError={() => setFailed(true)} accessibilityLabel={`${item.name} 사진`} />
       ) : (
         <View style={[area, styles.noPhoto]}>
           <View style={styles.placeholder}>
