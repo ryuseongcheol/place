@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { fetchRecommendations, fetchThemes, rerankRecommendations, searchByName, searchDb } from "./src/api";
 import BottomSheet, { type BottomSheetRef, type SheetSnap } from "./src/BottomSheet";
@@ -50,7 +50,20 @@ interface Results {
   warnings: string[];
   /** AI가 순서를 다듬는 중 */
   aiPending?: boolean;
+  /** 더 보기: 이어서 받는 방법 (검색 방식마다 다름) */
+  more?: MoreSource;
+  /** 더 받을 가게가 있을 것 같은지 */
+  hasMore?: boolean;
+  loadingMore?: boolean;
 }
+
+type MoreSource =
+  | { kind: "db"; req: { lat: number; lng: number; radius: number; theme: ReturnType<typeof themeDef> | null; q: string | null } }
+  | { kind: "live"; req: Omit<Parameters<typeof fetchRecommendations>[0], "page" | "exclude">; page: number }
+  | { kind: "region"; regionId: string; theme: ThemePreset | null; q: string };
+
+/** 지역(미리 모은 데이터)에서 더 보기 한 번에 늘리는 수 */
+const REGION_PAGE = 30;
 
 type SortMode = "recommend" | "rating" | "distance" | "reviews";
 const SORTS: Array<{ id: SortMode; label: string }> = [
@@ -268,6 +281,49 @@ function MapScreen() {
   const selectedId = snap !== "closed" && sheet.mode === "detail" ? sheet.place.id : (cardPlace?.id ?? null);
   const favGroupColor = favGroupId ? fav.groups.find((g) => g.id === favGroupId)?.color : null;
 
+  /** 더 보기: 지금 결과 뒤에 다음 가게들을 이어 붙인다 (지도 번호·카드도 이어서) */
+  const loadMore = async (fromCards = false) => {
+    const r = results;
+    if (!r?.more || !r.hasMore || r.loadingMore) return;
+    setResults((prev) => (prev && prev.id === r.id ? { ...prev, loadingMore: true } : prev));
+    try {
+      let add: ScoredPlace[] = [];
+      let hasMore = false;
+      let more: MoreSource = r.more;
+      if (more.kind === "db") {
+        const d = await searchDb({ ...more.req, offset: r.places.length });
+        add = d.places;
+        hasMore = !!d.hasMore;
+      } else if (more.kind === "live") {
+        const res = await fetchRecommendations({ ...more.req, page: more.page + 1, exclude: r.places.map((p) => p.id) });
+        add = res.places;
+        hasMore = !!res.hasMore;
+        more = { ...more, page: more.page + 1 };
+      } else {
+        const places = await rg.loadPlaces(more.regionId);
+        const upto = r.places.length + REGION_PAGE;
+        const ranked = more.q ? rankByText(places, more.q, me, upto + 1) : rankByTheme(places, more.theme!, me, upto + 1);
+        add = ranked.slice(r.places.length, upto);
+        hasMore = ranked.length > upto;
+      }
+      // 카드 끝 '더 보기'에서 불렀으면 새로 붙은 첫 가게 카드로 넘어간다
+      if (fromCards) {
+        const had = new Set(r.places.map((p) => p.id));
+        const first = add.find((p) => !had.has(p.id));
+        if (first) cardPlaceId.current = first.id;
+      }
+      setResults((prev) => {
+        if (!prev || prev.id !== r.id) return prev;
+        const seen = new Set(prev.places.map((p) => p.id));
+        const fresh = add.filter((p) => !seen.has(p.id));
+        return { ...prev, places: [...prev.places, ...fresh], more, hasMore: hasMore && fresh.length > 0, loadingMore: false };
+      });
+    } catch (e) {
+      setResults((prev) => (prev && prev.id === r.id ? { ...prev, loadingMore: false } : prev));
+      Alert.alert("더 불러오지 못했어요", e instanceof Error ? e.message : "잠시 후 다시 시도해 주세요.");
+    }
+  };
+
   const showList = (mode: ListMode) => {
     setSheet(mode);
     setSnap("half");
@@ -289,7 +345,8 @@ function MapScreen() {
         if (loc.status === "locating") return;
         const radiusText = formatRadius(radius);
         // 1) 서버 DB에 이 근처를 분석해 둔 데이터가 충분하면 바로 (빠르고, 분류값이 정확함)
-        const db = await searchDb({ lat: loc.lat, lng: loc.lng, radius, theme: theme && !q ? themeDef(theme) : null, q: q || null }).catch(() => null);
+        const dbReq = { lat: loc.lat, lng: loc.lng, radius, theme: theme && !q ? themeDef(theme) : null, q: q || null };
+        const db = await searchDb(dbReq).catch(() => null);
         if (db && db.analyzed >= 30 && db.places.length >= 8) {
           next = {
             id: searchId,
@@ -297,11 +354,13 @@ function MapScreen() {
             title: q || theme!.label,
             subtitle: `내 주변 ${radiusText} · 저장된 ${db.inArea.toLocaleString()}곳 중 (분석 ${db.analyzed.toLocaleString()}곳)`,
             warnings: [],
+            more: { kind: "db", req: dbReq },
+            hasMore: !!db.hasMore,
           };
         } else {
           // 2) 아니면 실시간 (카카오 검색 + 리뷰 수집)
           //    빠른 결과를 먼저 보여주고, AI 정렬은 뒤에서 이어서 반영
-          const res = await fetchRecommendations({
+          const liveReq = {
             lat: loc.lat,
             lng: loc.lng,
             radius,
@@ -309,7 +368,8 @@ function MapScreen() {
             theme: theme ? themeDef(theme) : null,
             text: q || null,
             fast: true,
-          });
+          };
+          const res = await fetchRecommendations(liveReq);
           next = {
             id: searchId,
             places: res.places,
@@ -317,6 +377,8 @@ function MapScreen() {
             subtitle: `내 주변 ${radiusText} · 실시간 · 검색어 ${res.query.keywords.join(", ")}`,
             warnings: res.warnings,
             aiPending: res.aiPending,
+            more: { kind: "live", req: liveReq, page: 1 },
+            hasMore: !!res.hasMore && res.places.length > 0,
           };
           if (res.aiPending) {
             rerankRecommendations(res.query, res.places)
@@ -328,16 +390,18 @@ function MapScreen() {
         const region = source.region;
         const places = await rg.loadPlaces(region.id);
         const pr = rg.progress[region.id];
-        const ranked = q ? rankByText(places, q, me) : rankByTheme(places, theme!, me);
+        const ranked = q ? rankByText(places, q, me, REGION_PAGE + 1) : rankByTheme(places, theme!, me, REGION_PAGE + 1);
         const warnings: string[] = [];
         if (!places.length) warnings.push("아직 이 지역 맛집을 모으는 중이에요. 설정에서 진행 상황을 볼 수 있어요.");
         else if (pr && pr.phase !== "done") warnings.push(`수집 중이라 ${pr.detailed}/${pr.target}곳만 분석됐어요. 끝나면 더 정확해져요.`);
         next = {
           id: searchId,
-          places: ranked,
+          places: ranked.slice(0, REGION_PAGE),
           title: `${region.name} · ${q || theme!.label}`,
-          subtitle: `미리 수집한 ${places.length}곳 중 ${ranked.length}곳`,
+          subtitle: `미리 수집한 ${places.length}곳에서`,
           warnings,
+          more: { kind: "region", regionId: region.id, theme, q },
+          hasMore: ranked.length > REGION_PAGE,
         };
       }
       if (next.places.length === 0 && !next.warnings.length) next.warnings.push("조건에 맞는 곳이 없어요. 다른 주제나 검색어로 찾아보세요.");
@@ -561,6 +625,21 @@ function MapScreen() {
         numbered
         notices={results?.warnings}
         emptyText="추천 결과가 없어요."
+        footer={
+          results?.hasMore ? (
+            <Pressable
+              onPress={() => loadMore()}
+              disabled={results.loadingMore}
+              style={{ margin: 16, borderWidth: 1, borderColor: c.line, borderRadius: 12, paddingVertical: 13, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}
+              accessibilityRole="button"
+            >
+              {results.loadingMore ? <ActivityIndicator color={c.accent} size="small" /> : null}
+              <Text style={{ color: c.text, fontSize: 14, fontWeight: "700" }}>{results.loadingMore ? "더 불러오는 중…" : `더 보기 (지금 ${results.places.length}곳)`}</Text>
+            </Pressable>
+          ) : results && results.places.length >= 20 ? (
+            <Text style={{ textAlign: "center", color: c.muted, fontSize: 12, paddingVertical: 16 }}>조건에 맞는 곳을 모두 보여드렸어요. ({results.places.length}곳)</Text>
+          ) : null
+        }
       />
     );
   }
@@ -704,6 +783,8 @@ function MapScreen() {
               distanceOf={distanceOf}
               colors={c}
               iconsReady={iconsReady}
+              // 추천 결과 끝: 더 보기 카드 (넘겨서 닿으면 자동으로 불러온다)
+              more={layer === "results" && results?.hasMore ? { loading: !!results.loadingMore, onLoad: () => loadMore(true) } : undefined}
             />
           </View>
         </>

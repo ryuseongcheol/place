@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { rankByText, rankByTheme } from "./rankCrawled";
+import { RESULT_LIMIT, rankByText, rankByTheme } from "./rankCrawled";
 import { fromRow, upsertStatements, type PlaceRow } from "./placeRow";
 import { getPreset, type ThemePreset } from "./themes";
 import type { CrawledPlace, ScoredPlace } from "./types";
@@ -62,13 +62,15 @@ export interface DbSearch {
   /** 고친 주제·새 주제·여러 주제를 합친 것 (themeId 대신) */
   theme?: ThemePreset | null;
   q?: string | null;
+  /** 더 보기: 이미 보여 준 수 (그다음부터 RESULT_LIMIT 곳) */
+  offset?: number;
 }
 
 /**
  * DB에서 위치·주제(또는 검색어)로 추천. 주제는 미리 계산한 적합도로 먼저 좁히고,
  * 최종 순위는 앱과 같은 rankCrawled 로 낸다.
  */
-export async function searchDb(db: D1, s: DbSearch): Promise<{ places: ScoredPlace[]; inArea: number; analyzed: number }> {
+export async function searchDb(db: D1, s: DbSearch): Promise<{ places: ScoredPlace[]; inArea: number; analyzed: number; hasMore: boolean }> {
   await ensureSchema(db);
   const [minLat, maxLat, minLng, maxLng] = bbox(s.lat, s.lng, s.radius);
   const center = { lat: s.lat, lng: s.lng };
@@ -123,9 +125,12 @@ export async function searchDb(db: D1, s: DbSearch): Promise<{ places: ScoredPla
           .all<PlaceRow>()
       ).results;
     }
-  } else return { places: [], inArea: counts?.n ?? 0, analyzed: counts?.d ?? 0 };
+  } else return { places: [], inArea: counts?.n ?? 0, analyzed: counts?.d ?? 0, hasMore: false };
 
   const places = rows.map((r) => fromRow(r, center)).filter((p) => haversine(center, p) <= s.radius);
-  const ranked = q ? rankByText(places, q, center) : rankByTheme(places, theme!, center);
-  return { places: ranked, inArea: counts?.n ?? 0, analyzed: counts?.d ?? 0 };
+  // 더 보기: 앞쪽까지 포함해 한 곳 더 계산해서 다음이 있는지 안다
+  const offset = Math.max(0, s.offset ?? 0);
+  const upto = offset + RESULT_LIMIT + 1;
+  const ranked = q ? rankByText(places, q, center, upto) : rankByTheme(places, theme!, center, upto);
+  return { places: ranked.slice(offset, offset + RESULT_LIMIT), inArea: counts?.n ?? 0, analyzed: counts?.d ?? 0, hasMore: ranked.length > offset + RESULT_LIMIT };
 }

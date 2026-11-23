@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import SafeImage from "./SafeImage";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { formatDistance } from "./PlaceDetailView";
 import { useDetail } from "./detailCache";
 import { useMyNotes } from "./myNotes";
@@ -29,10 +29,12 @@ interface Props {
   iconsReady?: boolean;
   /** 추천 순위 번호 붙이기 (저장 리스트는 번호 없이) */
   numbered?: boolean;
+  /** 끝에 '더 보기' 카드 (넘겨서 닿거나 누르면 다음 가게들을 불러온다) */
+  more?: { loading: boolean; onLoad: () => void };
 }
 
 /** 지도 아래 맛집 카드: 좌우로 넘기면 지도에서 그 가게가 선택된다 */
-const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel({ places, index, onIndexChange, onOpen, distanceOf, colors: c, iconsReady, numbered = true }, ref) {
+const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel({ places, index, onIndexChange, onOpen, distanceOf, colors: c, iconsReady, numbered = true, more }, ref) {
   const { width } = useWindowDimensions();
   const cardW = width - SIDE * 2;
   const step = cardW + GAP;
@@ -59,6 +61,18 @@ const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel
   }, [index]);
 
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastX = useRef(0);
+  // 더 보기로 가게가 늘어나면, '더 보기' 카드 자리에 온 새 가게를 지금 카드로 알린다 (지도도 그 가게로)
+  const prevLen = useRef(places.length);
+  useEffect(() => {
+    const before = prevLen.current;
+    prevLen.current = places.length;
+    // 늘어났고, 직전에 '더 보기' 카드(옛 목록의 끝 다음 칸)에 있었을 때만
+    if (places.length <= before || Math.round(lastX.current / step) !== before) return;
+    shown.current = before;
+    onIndexChange(before);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [places.length]);
   useEffect(() => () => {
     if (settle.current) clearTimeout(settle.current);
     if (targetTimer.current) clearTimeout(targetTimer.current);
@@ -69,7 +83,12 @@ const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel
       if (Math.abs(x - target.current * step) < 2) target.current = null;
       return;
     }
-    const i = Math.max(0, Math.min(places.length - 1, Math.round(x / step)));
+    lastX.current = x;
+    const raw = Math.round(x / step);
+    // 끝의 '더 보기' 카드까지 넘기면 자동으로 불러온다 (그 자리에 머물다가 새 가게 카드로 바뀐다)
+    if (more && !more.loading && raw >= places.length) more.onLoad();
+    const snapI = Math.max(0, Math.min(places.length - (more ? 0 : 1), raw));
+    const i = Math.min(snapI, places.length - 1);
     if (i !== shown.current) {
       shown.current = i;
       onIndexChange(i);
@@ -77,7 +96,7 @@ const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel
     // 멈춘 자리가 카드 경계가 아니면 가까운 카드에 맞춘다 (안드로이드는 snapToInterval 로 이미 맞음)
     if (settle.current) clearTimeout(settle.current);
     settle.current = setTimeout(() => {
-      if (Math.abs(x - i * step) > 1) listRef.current?.scrollToOffset({ offset: i * step, animated: true });
+      if (Math.abs(x - snapI * step) > 1) listRef.current?.scrollToOffset({ offset: snapI * step, animated: true });
     }, 160);
   };
 
@@ -99,6 +118,15 @@ const PlaceCarousel = forwardRef<PlaceCarouselRef, Props>(function PlaceCarousel
       onScrollBeginDrag={() => (target.current = null)}
       scrollEventThrottle={32}
       windowSize={5}
+      ListFooterComponent={
+        more ? (
+          <Pressable onPress={more.onLoad} disabled={more.loading} style={[styles.card, styles.moreCard, { width: cardW, backgroundColor: c.surface }]} accessibilityRole="button" accessibilityLabel="결과 더 보기">
+            {more.loading ? <ActivityIndicator color={c.accent} /> : <Text style={{ fontSize: 28, color: c.accent }}>＋</Text>}
+            <Text style={{ fontSize: 15, fontWeight: "700", color: c.text, marginTop: 8 }}>{more.loading ? "더 불러오는 중…" : "더 보기"}</Text>
+            <Text style={{ fontSize: 12, color: c.muted, marginTop: 4 }}>지금 {places.length}곳 · 다음 가게들을 이어서 보여드려요</Text>
+          </Pressable>
+        ) : undefined
+      }
       renderItem={({ item, index: i }) => (
         <PlaceCard place={item} rank={numbered ? i + 1 : null} width={cardW} near={Math.abs(i - index) <= 1} distance={distanceOf(item)} onPress={() => onOpen(item)} colors={c} iconsReady={iconsReady} />
       )}
@@ -218,6 +246,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 6,
   },
+  moreCard: { alignItems: "center", justifyContent: "center" },
   head: { flexDirection: "row", alignItems: "center", gap: 4 },
   name: { flex: 1, fontSize: 18, fontWeight: "800", letterSpacing: -0.3, marginRight: 6 },
   chips: { flexDirection: "row", gap: 6, marginTop: 10, overflow: "hidden", height: 26 },

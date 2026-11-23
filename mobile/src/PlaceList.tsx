@@ -37,9 +37,11 @@ interface Props {
   notices?: string[];
   /** 번호 대신 ★ 배지일 때 색 (저장 리스트 색) */
   badgeColor?: (p: ScoredPlace) => string;
+  /** 목록 끝에 붙일 것 (더 보기 버튼) */
+  footer?: React.ReactNode;
 }
 
-export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, numbered, notices, badgeColor }: Props) {
+export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, numbered, notices, badgeColor, footer }: Props) {
   const notes = useMyNotes();
   return (
     <View>
@@ -93,6 +95,7 @@ export function PlaceList({ places, colors: c, distanceOf, onPick, emptyText, nu
           </Pressable>
         );
       })}
+      {footer}
     </View>
   );
 }

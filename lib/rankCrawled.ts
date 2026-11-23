@@ -11,7 +11,8 @@ import { haversine, normalizeName } from "./util";
  * 검색어: 이름·카테고리·메뉴·태그·후기 일치 + 분류값 이름 일치
  */
 
-const RESULT_LIMIT = 30;
+/** 한 번에 보여 주는 수 (더 보기로 이어서) */
+export const RESULT_LIMIT = 30;
 
 /** 정렬된 목록에서 같은 브랜드(체인) 지점 묶기: 남길 식당 id → 숨긴 다른 지점 수 */
 const branchCache = new WeakMap<object, Map<string, number>>();
@@ -74,7 +75,8 @@ function ratingText(p: CrawledPlace) {
   return `${p.rating !== null ? ` 카카오 ★${p.rating.toFixed(1)}(${p.ratingCount}명).` : ""}${tv}`;
 }
 
-export function rankByTheme(places: CrawledPlace[], theme: ThemePreset, me: { lat: number; lng: number } | null): ScoredPlace[] {
+/** limit: 앞에서부터 몇 곳까지 (더 보기는 limit 을 늘려 다시 계산하고 뒷부분만 쓴다. 순위는 늘 같다) */
+export function rankByTheme(places: CrawledPlace[], theme: ThemePreset, me: { lat: number; lng: number } | null, limit = RESULT_LIMIT): ScoredPlace[] {
   return places
     .map((p) => {
       const fit = attrFit(p.attrs as Attrs, theme.attrs);
@@ -87,7 +89,7 @@ export function rankByTheme(places: CrawledPlace[], theme: ThemePreset, me: { la
       const c = branchCounts(arr);
       return c.has(x.p.id) ? [{ ...x, p: { ...x.p, otherBranches: c.get(x.p.id) || undefined } }] : [];
     })
-    .slice(0, RESULT_LIMIT)
+    .slice(0, limit)
     .map(({ p, fit, score }) => {
       const why = topReasons(p.attrs as Attrs, theme.attrs);
       const reason = `${why.length ? `${why.join(", ")}(으)로 분류된 곳이에요.` : `'${theme.label}'에 어울리는 곳이에요.`}${ratingText(p)}`;
@@ -109,7 +111,7 @@ function attrsFromText(tokens: string[]): Partial<Record<AttrKey, number>> {
   return w;
 }
 
-export function rankByText(places: CrawledPlace[], text: string, me: { lat: number; lng: number } | null): ScoredPlace[] {
+export function rankByText(places: CrawledPlace[], text: string, me: { lat: number; lng: number } | null, limit = RESULT_LIMIT): ScoredPlace[] {
   const tokens = text
     .split(/\s+/)
     .map((t) => t.trim())
@@ -143,7 +145,7 @@ export function rankByText(places: CrawledPlace[], text: string, me: { lat: numb
       const c = branchCounts(arr);
       return c.has(x.p.id) ? [{ ...x, p: { ...x.p, otherBranches: c.get(x.p.id) || undefined } }] : [];
     })
-    .slice(0, RESULT_LIMIT)
+    .slice(0, limit)
     .map(({ p, rel, score, match }) => {
       const reason = match > 0 ? `'${text}'와(과) 관련된 곳이에요.${ratingText(p)}` : `'${text}'에 어울리는 성격의 곳이에요.${ratingText(p)}`;
       return toScored(p, score, Math.round(rel), reason, me);

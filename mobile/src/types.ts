@@ -94,6 +94,10 @@ export interface RecommendRequest {
   /** 앱에서 고친 주제·새 주제·여러 주제를 합친 것 (있으면 presetId 대신 사용) */
   theme?: ThemeDef | null;
   text?: string | null;
+  /** 더 보기: 몇 번째 묶음인지 (1부터). 2 이상이면 카카오 검색을 더 깊이 */
+  page?: number;
+  /** 더 보기: 이미 보여 준 가게 id (빼고 다음 가게들을 고른다) */
+  exclude?: string[];
 }
 
 export type SourceStatus = "ok" | "partial" | "failed" | "disabled" | "mock";
@@ -111,6 +115,8 @@ export interface RecommendResponse {
   warnings: string[];
   /** 빠른 모드: AI 재정렬이 아직 안 됨 (앱이 /api/recommend/rerank 를 따로 부른다) */
   aiPending?: boolean;
+  /** 더 보기로 이어서 받을 가게가 더 있을 것 같은지 */
+  hasMore?: boolean;
 }
 
 // ---------- 식당 상세 (/api/place/[id]) ----------

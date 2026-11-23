@@ -23,6 +23,9 @@ export async function recommend(req: RecommendRequest, opts: { skipAi?: boolean 
   const radius = Math.min(5000, Math.max(200, req.radius ?? 1000));
   const preset = req.theme ? themeFromDef(req.theme) : getPreset(req.presetId);
   const text = (req.text ?? "").trim().slice(0, 200);
+  // 더 보기: 2번째 묶음부터는 카카오 검색을 한 쪽씩 더 깊이 보고, 이미 보여 준 가게는 뺀다
+  const page = Math.max(1, Math.min(5, req.page ?? 1));
+  const exclude = new Set(req.exclude ?? []);
   const mock = isMockMode();
   const useUnofficial = process.env.UNOFFICIAL_REVIEWS !== "0";
   const warnings: string[] = [];
@@ -59,7 +62,7 @@ export async function recommend(req: RecommendRequest, opts: { skipAi?: boolean 
     candidates = mockPlaces(loc, query.keywords).filter((p) => p.distance <= radius * 1.2);
   } else {
     const jobs = query.keywords.flatMap((k, i) => {
-      const list: Promise<BasePlace[]>[] = [searchKakao(k, loc, radius, "FD6", plan.kakaoPages, budget)];
+      const list: Promise<BasePlace[]>[] = [searchKakao(k, loc, radius, "FD6", Math.min(3, plan.kakaoPages + page - 1), budget)];
       if (query.includeCafe && i < 3) list.push(searchKakao(k, loc, radius, "CE7", 1, budget));
       return list;
     });
@@ -73,6 +76,7 @@ export async function recommend(req: RecommendRequest, opts: { skipAi?: boolean 
     candidates = mergeCandidates(settled.flatMap((s) => (s.status === "fulfilled" ? s.value : [])));
   }
 
+  if (exclude.size) candidates = candidates.filter((p) => !exclude.has(p.id));
   // 회피 키워드가 카테고리에 있으면 제외
   if (query.avoid.length) {
     candidates = candidates.filter((p) => !query.avoid.some((a) => a && `${p.category}`.includes(a)));
@@ -85,6 +89,7 @@ export async function recommend(req: RecommendRequest, opts: { skipAi?: boolean 
   candidates = candidates.slice(0, detailCount);
 
   if (candidates.length === 0) {
+    if (page > 1) return { query, region, places: [], sources, warnings: [], hasMore: false };
     return { query, region, places: [], sources, warnings: [...warnings, "반경 안에서 조건에 맞는 식당을 찾지 못했어요. 반경을 넓혀보세요."] };
   }
 
@@ -171,11 +176,13 @@ export async function recommend(req: RecommendRequest, opts: { skipAi?: boolean 
     }
   }
 
-  if (!mock && totalFound < 10 && radius < 5000) {
+  // 더 있을지: 이번에 못 본 후보가 남았거나, 카카오 검색을 더 깊이 볼 수 있으면
+  const hasMore = !mock && (totalFound > candidates.length || page < 3);
+  if (!mock && page === 1 && totalFound < 10 && radius < 5000) {
     warnings.push(`반경 안에서 ${totalFound}곳만 찾았어요. 반경을 넓히면 더 많이 볼 수 있어요.`);
   }
   // 빠른 모드: AI가 고를 후보까지 조금 더 넉넉히 돌려준다
-  return { query, region, places: scored.slice(0, aiPending ? RESULT_COUNT + 6 : RESULT_COUNT), sources, warnings, aiPending };
+  return { query, region, places: scored.slice(0, aiPending ? RESULT_COUNT + 6 : RESULT_COUNT), sources, warnings, aiPending, hasMore };
 }
 
 /** AI가 리뷰를 읽고 순서·추천 이유를 다시 정한다 (실패하면 예외) */

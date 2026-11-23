@@ -19,6 +19,10 @@ const Body = z.object({
   text: z.string().max(200).nullish(),
   /** true면 AI 재정렬 없이 바로 응답 (앱이 /api/recommend/rerank 로 이어서 요청) */
   fast: z.boolean().optional(),
+  /** 더 보기: 몇 번째 묶음 (1부터) */
+  page: z.number().int().min(1).max(5).optional(),
+  /** 더 보기: 이미 보여 준 가게 id */
+  exclude: z.array(z.string().max(40)).max(400).optional(),
 });
 
 const CACHE_TTL = 20 * 60; // 같은 동네(약 100m)·조건이면 20분 동안 저장된 결과로 바로 응답
@@ -47,7 +51,8 @@ export async function POST(req: Request) {
   }
 
   const themeKey = body.theme ? hashKey(JSON.stringify(body.theme)) : (body.presetId ?? "");
-  const key = `rec:v2:${body.fast ? "f" : "a"}:${body.lat.toFixed(3)}:${body.lng.toFixed(3)}:${body.radius ?? 1000}:${themeKey}:${(body.text ?? "").trim()}`;
+  const more = body.page && body.page > 1 ? `:p${body.page}:${hashKey((body.exclude ?? []).slice().sort().join(","))}` : "";
+  const key = `rec:v2:${body.fast ? "f" : "a"}:${body.lat.toFixed(3)}:${body.lng.toFixed(3)}:${body.radius ?? 1000}:${themeKey}:${(body.text ?? "").trim()}${more}`;
   if (!isMockMode()) {
     const cached = await cacheGet<RecommendResponse>(key);
     if (cached) return NextResponse.json(cached, { headers: { "X-Cache": "HIT" } });

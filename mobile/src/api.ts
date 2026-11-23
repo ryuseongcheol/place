@@ -56,6 +56,9 @@ export function fetchRecommendations(body: {
   text: string | null;
   /** AI 재정렬 없이 먼저 받기 (rerankRecommendations 로 이어서) */
   fast?: boolean;
+  /** 더 보기: 몇 번째 묶음, 이미 보여 준 가게 id */
+  page?: number;
+  exclude?: string[];
 }) {
   return request<RecommendResponse>("/api/recommend", {
     method: "POST",
@@ -122,19 +125,21 @@ export function syncRegionsToServer(regions: Region[]) {
   }, 15000);
 }
 
-/** 서버 DB에서 위치·주제/검색어로 추천 */
-export function searchDb(p: { lat: number; lng: number; radius: number; theme?: ThemeDef | null; q?: string | null }) {
+/** 서버 DB에서 위치·주제/검색어로 추천. offset: 더 보기 (이미 받은 수) */
+export function searchDb(p: { lat: number; lng: number; radius: number; theme?: ThemeDef | null; q?: string | null; offset?: number }) {
+  type R = { places: ScoredPlace[]; inArea: number; analyzed: number; hasMore?: boolean };
   // 주제 내용을 같이 보낸다 (고친 주제·새 주제·여러 주제)
   if (p.theme) {
-    return request<{ places: ScoredPlace[]; inArea: number; analyzed: number }>(
+    return request<R>(
       "/api/db/search",
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lat: p.lat, lng: p.lng, radius: p.radius, theme: p.theme, q: p.q ?? null }) },
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lat: p.lat, lng: p.lng, radius: p.radius, theme: p.theme, q: p.q ?? null, offset: p.offset ?? 0 }) },
       20000,
     );
   }
   const qs = new URLSearchParams({ lat: String(p.lat), lng: String(p.lng), radius: String(p.radius) });
   if (p.q) qs.set("q", p.q);
-  return request<{ places: ScoredPlace[]; inArea: number; analyzed: number }>(`/api/db/search?${qs}`, undefined, 20000);
+  if (p.offset) qs.set("offset", String(p.offset));
+  return request<R>(`/api/db/search?${qs}`, undefined, 20000);
 }
 
 /** 기기에서 수집한 식당을 서버 DB에 올림 */
